@@ -1,9 +1,10 @@
 {
-  "name": "Tonmoy's Assistance",
-  "description": "A vision-capable, real-time voice assistant with deep Windows integration and screen awareness.",
+  "name": "Bumba AI Assistance",
+  "description": "Virtual Windows OS integration with high-tech messaging, Face ID login, and industrial QMS management.",
   "requestFramePermissions": [
     "microphone",
     "camera",
-    "display-capture"
+    "display-capture",
+    "geolocation"
   ]
 }

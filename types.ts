@@ -1,20 +1,24 @@
+async function handleInput(text: string) {
+  setIsThinking(true);
 
-export interface Transcription {
-  text: string;
-  sender: 'user' | 'assistant';
-  timestamp: number;
-}
+  const intent = detectIntent(text);
 
-export interface SystemStatus {
-  volume: number;
-  brightness: number;
-  theme: 'light' | 'dark';
-  isConnected: boolean;
-  isListening: boolean;
-}
+  if (intent.type !== 'CHAT') {
+    execute(intent);
+    speak("Yes Boss");
+    setIsThinking(false);
+    return;
+  }
 
-export interface VoiceMessage {
-  type: 'transcription' | 'audio';
-  content: string;
-  sender: 'user' | 'assistant';
+  const reply = think(`
+  You are BUMBA.
+  Speak briefly.
+  Reply like a human assistant.
+  ${text}
+  `);
+
+  await humanDelay(reply);
+  speak(reply);
+
+  setIsThinking(false);
 }
