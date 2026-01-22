@@ -1,0 +1,9 @@
+{
+  "name": "Tonmoy's Assistance",
+  "description": "A vision-capable, real-time voice assistant with deep Windows integration and screen awareness.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera",
+    "display-capture"
+  ]
+}
