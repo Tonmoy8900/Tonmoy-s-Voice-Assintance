@@ -1,24 +1,21 @@
-async function handleInput(text: string) {
-  setIsThinking(true);
 
-  const intent = detectIntent(text);
+/**
+ * Transcription interface for tracking communication history.
+ */
+export interface Transcription {
+  text: string;
+  sender: 'user' | 'assistant';
+  timestamp: number;
+}
 
-  if (intent.type !== 'CHAT') {
-    execute(intent);
-    speak("Yes Boss");
-    setIsThinking(false);
-    return;
-  }
-
-  const reply = think(`
-  You are BUMBA.
-  Speak briefly.
-  Reply like a human assistant.
-  ${text}
-  `);
-
-  await humanDelay(reply);
-  speak(reply);
-
-  setIsThinking(false);
+/**
+ * SystemStatus interface for device and application state management.
+ */
+export interface SystemStatus {
+  volume: number;
+  brightness: number;
+  theme: 'dark' | 'light';
+  isConnected: boolean;
+  isListening: boolean;
+  isSharingScreen: boolean;
 }

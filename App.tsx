@@ -15,12 +15,9 @@ interface QMSReport {
 
 interface AppState extends SystemStatus {
   battery: number;
-  isSharingScreen: boolean;
   cpuUsage: number;
   isOnline: boolean;
-  isMinimized: boolean;
   activeApp: string;
-  language: 'en' | 'hi' | 'bn';
   isAuthenticated: boolean;
   isScanningFace: boolean;
 }
@@ -32,13 +29,11 @@ const App: React.FC = () => {
     theme: 'dark',
     isConnected: false,
     isListening: false,
-    battery: 100,
+    battery: 94,
     isSharingScreen: false,
-    cpuUsage: 12,
+    cpuUsage: 8,
     isOnline: navigator.onLine,
-    isMinimized: false,
-    activeApp: 'Desktop',
-    language: 'en',
+    activeApp: 'Windows Kernel',
     isAuthenticated: false,
     isScanningFace: false
   });
@@ -46,14 +41,12 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<Transcription[]>([]);
   const [isAITalking, setIsAITalking] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
-  const [lastAction, setLastAction] = useState<{msg: string, icon: string} | null>(null);
-  const [qmsReports, setQmsReports] = useState<QMSReport[]>([
-    { id: 'Q-901', category: 'Quality', status: 'Stable', description: 'Ore grade analysis within limits.', timestamp: '10:15 AM' },
-    { id: 'S-442', category: 'Safety', status: 'Critical', description: 'Pit wall vibration detected above threshold.', timestamp: '11:02 AM' }
-  ]);
-
   const [terminalLines, setTerminalLines] = useState<string[]>([]);
-  const [messageHUD, setMessageHUD] = useState({ visible: false, to: '', text: '' });
+  
+  // New HUD States
+  const [messageHUD, setMessageHUD] = useState({ visible: false, to: '', text: '', type: 'outgoing' as 'outgoing' | 'incoming' });
+  const [mailHUD, setMailHUD] = useState({ visible: false, items: [] as any[] });
+  const [fileHUD, setFileHUD] = useState({ visible: false, name: '', content: '', progress: 0 });
 
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
@@ -65,18 +58,13 @@ const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const addTerminalLine = (line: string) => {
-    setTerminalLines(prev => [...prev.slice(-10), `> ${line}`]);
+    const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setTerminalLines(prev => [...prev.slice(-12), `[${timestamp}] ${line}`]);
   };
 
-  const showAction = (msg: string, icon: string = 'fa-bolt') => {
-    setLastAction({ msg, icon });
-    setTimeout(() => setLastAction(null), 3000);
-  };
-
-  // Face Recognition Login Simulation
   const startFaceID = async () => {
     setState(s => ({ ...s, isScanningFace: true }));
-    addTerminalLine("INITIATING OPTICAL BIOMETRIC SCAN...");
+    addTerminalLine("SYS_INIT: BIOMETRIC_AUTH_REQUEST");
     
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -86,14 +74,13 @@ const App: React.FC = () => {
       }
       
       setTimeout(() => {
-        addTerminalLine("FACE RECOGNITION SUCCESSFUL: TONMOY DETECTED.");
+        addTerminalLine("AUTH_SUCCESS: TONMOY_IDENTIFIED [UID: 001]");
         setState(s => ({ ...s, isAuthenticated: true, isScanningFace: false }));
-        showAction("Access Granted: Tonmoy", "fa-user-check");
         if (stream) stream.getTracks().forEach(t => t.stop());
-        startSession(); // Auto-start voice after login
-      }, 3000);
+        startSession(); 
+      }, 2500);
     } catch (e) {
-      addTerminalLine("FACE SCAN FAILED. MANUAL LOGIN REQUIRED.");
+      addTerminalLine("AUTH_ERROR: CAMERA_ACCESS_DENIED");
       setState(s => ({ ...s, isScanningFace: false }));
     }
   };
@@ -107,7 +94,6 @@ const App: React.FC = () => {
           volume: { type: Type.NUMBER },
           brightness: { type: Type.NUMBER },
           openApp: { type: Type.STRING },
-          language: { type: Type.STRING, enum: ['en', 'hi', 'bn'] },
           sendMessage: {
             type: Type.OBJECT,
             properties: { to: { type: Type.STRING }, text: { type: Type.STRING } }
@@ -116,21 +102,30 @@ const App: React.FC = () => {
       }
     },
     {
-      name: 'qmsManager',
+      name: 'checkWhatsApp',
+      parameters: { type: Type.OBJECT, description: 'Check for new incoming WhatsApp messages.' }
+    },
+    {
+      name: 'readEmails',
+      parameters: { type: Type.OBJECT, description: 'Scan and read recent emails from Outlook/Gmail.' }
+    },
+    {
+      name: 'createFile',
       parameters: {
         type: Type.OBJECT,
-        description: 'Manage Quality, Safety, and Environment reports.',
+        description: 'Create a new system file with specific content.',
         properties: {
-          action: { type: Type.STRING, enum: ['getReports', 'updateStatus', 'alertTeam'] },
-          reportId: { type: Type.STRING }
-        }
+          fileName: { type: Type.STRING },
+          content: { type: Type.STRING }
+        },
+        required: ['fileName', 'content']
       }
     }
   ];
 
   const startSession = async () => {
     try {
-      addTerminalLine("CONNECTING TO BUMBA CORE ENGINE...");
+      addTerminalLine("SYNC: CONNECTING_TO_BUMBA_CLOUD_GRID...");
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -141,19 +136,16 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
-          systemInstruction: `You are BUMBA, a world-class AI Assistant for Tonmoy.
-          You speak English, Hindi, and Bengali fluently.
+          systemInstruction: `You are BUMBA, Tonmoy's Ultra-Fast Assistant. 
+          Respond with "Yes Boss" immediately to any wake word.
           
-          CORE PERSONALITY:
-          - Reply with "Yes Boss" when called Bumba.
-          - You handle Windows commands (WhatsApp, Volume, Brightness).
-          - You handle QMS (Quality Management System) for Mining/Industrial operations.
-          - You are sharp, fast, and extremely helpful.
+          CAPABILITIES:
+          1. WhatsApp: Check new messages (checkWhatsApp) or Send (sendMessage).
+          2. Mail: Read recent emails (readEmails).
+          3. System: Create files (createFile), Adjust Volume/Brightness.
           
-          MULTI-LINGUAL MODE:
-          - If the user speaks in Hindi, reply in Hindi.
-          - If the user speaks in Bengali, reply in Bengali.
-          - Always keep the "Yes Boss" catchphrase.`,
+          STYLE:
+          High-tech, efficient, robotic. No long sentences. Act instantly.`,
           tools: [{ functionDeclarations: systemTools }],
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -161,7 +153,7 @@ const App: React.FC = () => {
         callbacks: {
           onopen: () => {
             setState(s => ({ ...s, isConnected: true, isListening: true }));
-            addTerminalLine("BUMBA ONLINE. AWAITING BOSS COMMANDS.");
+            addTerminalLine("STATUS: BUMBA_CORE_SYNCED_AND_READY.");
             const source = inputAudioContextRef.current!.createMediaStreamSource(stream);
             analyzerRef.current = inputAudioContextRef.current!.createAnalyser();
             const processor = inputAudioContextRef.current!.createScriptProcessor(2048, 1, 1);
@@ -174,7 +166,10 @@ const App: React.FC = () => {
           },
           onmessage: async (message) => {
             if (message.serverContent?.inputTranscription) transcriptionBufferRef.current.user += message.serverContent.inputTranscription.text;
-            if (message.serverContent?.outputTranscription) transcriptionBufferRef.current.assistant += message.serverContent.outputTranscription.text;
+            if (message.serverContent?.outputTranscription) {
+              transcriptionBufferRef.current.assistant += message.serverContent.outputTranscription.text;
+              setIsThinking(true);
+            }
             
             if (message.serverContent?.turnComplete) {
               const { user, assistant } = transcriptionBufferRef.current;
@@ -187,6 +182,7 @@ const App: React.FC = () => {
             const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (base64Audio) {
               setIsAITalking(true);
+              setIsThinking(false);
               const ctx = outputAudioContextRef.current!;
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
               const audioBuffer = await decodeAudioData(decode(base64Audio), ctx, 24000, 1);
@@ -202,24 +198,42 @@ const App: React.FC = () => {
             if (message.toolCall) {
               for (const fc of message.toolCall.functionCalls) {
                 const args = fc.args as any;
+                addTerminalLine(`SYNC_CMD: EXEC_${fc.name.toUpperCase()}`);
+                
                 if (fc.name === 'controlSystem') {
                   if (args.volume) setState(s => ({ ...s, volume: args.volume }));
-                  if (args.openApp) {
-                    setState(s => ({ ...s, activeApp: args.openApp }));
-                    addTerminalLine(`EXECUTING SHELL: START ${args.openApp}`);
-                  }
                   if (args.sendMessage) {
-                    setMessageHUD({ visible: true, to: args.sendMessage.to, text: args.sendMessage.text });
-                    setTimeout(() => setMessageHUD(m => ({ ...m, visible: false })), 5000);
-                    addTerminalLine(`DISPATCHING WHATSAPP TO ${args.sendMessage.to}`);
+                    setMessageHUD({ visible: true, to: args.sendMessage.to, text: args.sendMessage.text, type: 'outgoing' });
+                    setTimeout(() => setMessageHUD(m => ({ ...m, visible: false })), 4000);
                   }
                 }
-                if (fc.name === 'qmsManager') {
-                  addTerminalLine(`QMS ENGINE: FETCHING INDUSTRIAL REVEIEW FOR ID ${args.reportId || 'ALL'}`);
-                  showAction("QMS Sync Complete", "fa-database");
+                
+                if (fc.name === 'checkWhatsApp') {
+                  setMessageHUD({ visible: true, to: 'RAM', text: 'Where are the reports, Boss?', type: 'incoming' });
+                  setTimeout(() => setMessageHUD(m => ({ ...m, visible: false })), 5000);
                 }
+
+                if (fc.name === 'readEmails') {
+                  setMailHUD({ visible: true, items: [{ from: 'HR', subject: 'Project Alpha Update' }, { from: 'Mining Co', subject: 'Safety Audit' }] });
+                  setTimeout(() => setMailHUD(h => ({ ...h, visible: false })), 6000);
+                }
+
+                if (fc.name === 'createFile') {
+                  setFileHUD({ visible: true, name: args.fileName, content: args.content, progress: 0 });
+                  let p = 0;
+                  const interval = setInterval(() => {
+                    p += 10;
+                    setFileHUD(h => ({ ...h, progress: p }));
+                    if (p >= 100) {
+                      clearInterval(interval);
+                      setTimeout(() => setFileHUD(h => ({ ...h, visible: false })), 2000);
+                      addTerminalLine(`FILE_SYS: ${args.fileName} WRITTEN_SUCCESSFULLY.`);
+                    }
+                  }, 200);
+                }
+
                 sessionPromiseRef.current?.then((session: any) => session.sendToolResponse({
-                  functionResponses: { id: fc.id, name: fc.name, response: { result: 'Command Processed.' } }
+                  functionResponses: { id: fc.id, name: fc.name, response: { result: 'Acknowledged_And_Synced' } }
                 }));
               }
             }
@@ -227,71 +241,69 @@ const App: React.FC = () => {
         }
       });
     } catch (e) {
-      console.error(e);
-      addTerminalLine("CORE CONNECTION ERROR. RETRYING...");
+      addTerminalLine("CRITICAL_ERROR: CORE_LINK_BROKEN.");
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#020202] text-white font-mono selection:bg-blue-500/30 overflow-hidden relative">
+    <div className="min-h-screen bg-[#050505] text-white font-mono selection:bg-blue-500/30 overflow-hidden relative">
       
-      {/* Background Ambience */}
-      <div className="fixed inset-0 pointer-events-none opacity-20 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_#1a365d_0%,_transparent_80%)]" />
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-30" />
+      {/* Dynamic Grid Background */}
+      <div className="fixed inset-0 pointer-events-none opacity-10 -z-10">
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-10" style={{ backgroundSize: '100% 2px, 3px 100%' }} />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_#3b82f6_0%,_transparent_70%)] opacity-30" />
       </div>
 
       {!state.isAuthenticated && !state.isScanningFace ? (
-        <div className="flex flex-col items-center justify-center min-h-screen gap-12 animate-fade-in">
-           <div className="w-48 h-48 rounded-[3rem] glass border border-blue-500/30 flex items-center justify-center animate-pulse shadow-[0_0_100px_rgba(37,99,235,0.2)]">
-              <i className="fa-solid fa-robot text-7xl text-blue-400"></i>
+        <div className="flex flex-col items-center justify-center min-h-screen gap-12">
+           <div className="relative group cursor-pointer" onClick={startFaceID}>
+              <div className="w-56 h-56 rounded-[4rem] glass border border-blue-500/20 flex items-center justify-center shadow-[0_0_80px_rgba(59,130,246,0.15)] group-hover:scale-105 transition-all">
+                <i className="fa-solid fa-robot text-8xl text-blue-500"></i>
+              </div>
+              <div className="absolute -inset-4 border border-blue-500/10 rounded-[4.5rem] animate-pulse"></div>
            </div>
-           <h1 className="text-4xl font-black tracking-[0.5em] text-blue-400">BUMBA CORE</h1>
-           <button 
-             onClick={startFaceID}
-             className="px-12 py-5 bg-blue-600 rounded-full font-black tracking-widest hover:bg-blue-500 transition-all active:scale-95 shadow-[0_0_40px_rgba(37,99,235,0.4)]"
-           >
-             START BIOMETRIC LOGIN
-           </button>
+           <div className="text-center">
+              <h1 className="text-5xl font-black tracking-[1em] text-blue-400 mb-4 ml-4">BUMBA</h1>
+              <p className="text-[10px] tracking-[0.4em] opacity-40 uppercase">System Lock Active - Requesting Biometrics</p>
+           </div>
         </div>
       ) : state.isScanningFace ? (
         <div className="flex flex-col items-center justify-center min-h-screen gap-8">
-           <div className="relative w-96 h-96 rounded-[4rem] overflow-hidden border-2 border-blue-500/50 shadow-2xl">
-              <video ref={videoRef} className="w-full h-full object-cover scale-x-[-1]" />
-              <div className="absolute inset-0 border-4 border-blue-400/30 rounded-[4rem] animate-[ping_2s_infinite]"></div>
-              <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/50 shadow-[0_0_20px_#3b82f6] animate-[scan_2s_infinite]"></div>
+           <div className="relative w-[32rem] h-[32rem] rounded-[5rem] overflow-hidden border border-blue-500/30 shadow-[0_0_100px_rgba(59,130,246,0.2)]">
+              <video ref={videoRef} className="w-full h-full object-cover grayscale brightness-125 scale-x-[-1]" />
+              <div className="absolute inset-0 bg-blue-500/5 mix-blend-overlay"></div>
+              <div className="absolute top-0 left-0 w-full h-0.5 bg-blue-400 shadow-[0_0_15px_#3b82f6] animate-[scan_1.5s_infinite]"></div>
+              <div className="absolute inset-10 border border-white/10 rounded-[3rem] pointer-events-none"></div>
            </div>
-           <p className="text-xl font-black animate-pulse tracking-widest text-blue-400">SCANNING BOSS'S FACE...</p>
+           <div className="flex items-center gap-4 px-8 py-3 glass rounded-full border border-blue-400/20">
+              <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></div>
+              <span className="text-xs font-black tracking-widest text-blue-400 uppercase">Analyzing Neural Signature...</span>
+           </div>
         </div>
       ) : (
         <>
-          {/* Main Dashboard UI */}
-          <header className="fixed top-0 left-0 right-0 p-10 flex justify-between items-center z-50">
+          <header className="fixed top-0 left-0 right-0 p-12 flex justify-between items-center z-50">
              <div className="flex items-center gap-6">
-                <div className="w-12 h-12 rounded-xl glass border border-blue-500/50 flex items-center justify-center">
-                   <i className="fa-solid fa-bolt text-blue-400"></i>
+                <div className="relative">
+                   <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_15px_#22c55e]"></div>
+                   <div className="absolute inset-0 bg-green-500 rounded-full animate-ping opacity-20"></div>
                 </div>
-                <div>
-                   <h2 className="text-xs font-black uppercase tracking-widest text-blue-400">BUMBA ACTIVE</h2>
-                   <p className="text-[10px] opacity-40 uppercase tracking-tighter">System Status: Nominal</p>
-                </div>
+                <span className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400/60">BUMBA_KERNEL_V2.9</span>
              </div>
-             <div className="flex gap-4">
-                <div className="glass px-6 py-2 rounded-full border border-white/5 flex items-center gap-4">
-                   <i className="fa-solid fa-language text-blue-400 text-xs"></i>
-                   <span className="text-[10px] font-black uppercase">{state.language}</span>
+             <div className="flex gap-12">
+                <div className="flex flex-col items-end">
+                   <span className="text-[9px] opacity-30 uppercase font-black mb-1 tracking-widest">CPU Load</span>
+                   <span className="text-xs font-black tabular-nums">{state.cpuUsage}%</span>
                 </div>
-                <div className="glass px-6 py-2 rounded-full border border-white/5 flex items-center gap-4">
-                   <i className="fa-solid fa-microchip text-blue-400 text-xs"></i>
-                   <span className="text-[10px] font-black uppercase">{state.cpuUsage}% LOAD</span>
+                <div className="flex flex-col items-end">
+                   <span className="text-[9px] opacity-30 uppercase font-black mb-1 tracking-widest">Battery</span>
+                   <span className="text-xs font-black tabular-nums">{state.battery}%</span>
                 </div>
              </div>
           </header>
 
-          <main className="flex-1 flex flex-col items-center justify-center p-6 relative">
-            
-            {/* Visualizer and Command View */}
-            <div className="relative group mb-12">
+          <main className="flex-1 flex flex-col items-center justify-center p-6">
+            <div className="relative group mb-12 transform scale-125">
                <Visualizer 
                   isActive={state.isConnected} 
                   isAITalking={isAITalking} 
@@ -303,78 +315,106 @@ const App: React.FC = () => {
                   cpuUsage={state.cpuUsage} 
                   isOnline={state.isOnline} 
                />
-               {isThinking && <div className="absolute inset-0 flex items-center justify-center"><div className="w-64 h-64 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div></div>}
             </div>
 
-            <div className="text-center max-w-4xl px-12 z-10 h-64 overflow-hidden">
-               <h1 className="text-6xl font-black tracking-tighter mb-8 drop-shadow-[0_0_20px_rgba(255,255,255,0.1)]">
-                 {isAITalking ? "BUMBA SPEAKING" : (state.isConnected ? "AWAITING BOSS" : "OFFLINE")}
+            <div className="text-center max-w-5xl px-12 h-48 flex flex-col items-center justify-center">
+               <h1 className="text-[5rem] font-black tracking-tighter leading-none mb-10 transition-all">
+                 {isAITalking ? "BUMBA" : (state.isConnected ? "YES BOSS?" : "SYNCING")}
                </h1>
-               <div className="flex flex-col gap-4">
+               <div className="space-y-4">
                  {history.slice(-1).map((h, i) => (
-                    <p key={i} className={`text-3xl font-light tracking-tight ${h.sender === 'user' ? 'text-white/20' : 'text-blue-400'}`}>
+                    <p key={i} className={`text-4xl font-light tracking-tight max-w-4xl transition-all ${h.sender === 'user' ? 'text-white/20 italic' : 'text-blue-400/90'}`}>
                        {h.text}
                     </p>
                  ))}
                </div>
             </div>
 
-            {/* Terminal View */}
-            <div className="fixed left-12 bottom-48 w-80 glass p-6 rounded-3xl border border-white/5 opacity-50 hover:opacity-100 transition-opacity">
-               <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 opacity-40">System Log</h3>
-               <div className="flex flex-col gap-2">
-                  {terminalLines.map((line, i) => (
-                    <div key={i} className="text-[9px] leading-tight text-white/60 font-mono overflow-hidden text-ellipsis whitespace-nowrap">{line}</div>
-                  ))}
+            {/* SYNC TERMINAL */}
+            <div className="fixed left-12 bottom-44 w-96 glass p-8 rounded-[2.5rem] border border-white/5 shadow-2xl">
+               <div className="flex items-center justify-between mb-6">
+                  <span className="text-[9px] font-black uppercase tracking-[0.3em] text-blue-400">Sync Monitor</span>
+                  <i className="fa-solid fa-circle-nodes text-xs opacity-20 animate-pulse"></i>
                </div>
-            </div>
-
-            {/* QMS Dashboard HUD */}
-            <div className="fixed right-12 top-48 w-80 glass p-6 rounded-3xl border border-white/5">
-               <h3 className="text-[10px] font-black uppercase tracking-widest mb-4 opacity-40">QMS Control Panel</h3>
-               <div className="flex flex-col gap-4">
-                  {qmsReports.map(report => (
-                    <div key={report.id} className="p-3 bg-white/5 rounded-xl border border-white/5">
-                       <div className="flex justify-between items-center mb-1">
-                          <span className="text-[10px] font-black text-blue-400">{report.id}</span>
-                          <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${report.status === 'Critical' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>{report.status}</span>
-                       </div>
-                       <p className="text-[10px] text-white/60 leading-tight">{report.description}</p>
+               <div className="space-y-2 max-h-[140px] overflow-hidden">
+                  {terminalLines.map((line, i) => (
+                    <div key={i} className="text-[9px] font-mono text-white/40 border-l border-white/5 pl-3 py-1 animate-fade-in whitespace-nowrap overflow-hidden text-ellipsis">
+                       {line}
                     </div>
                   ))}
                </div>
             </div>
-          </main>
 
-          {/* WhatsApp / Action HUD */}
-          <div className={`fixed inset-0 z-[100] flex items-center justify-center pointer-events-none transition-all duration-700 ${messageHUD.visible ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}>
-            <div className="glass p-12 rounded-[4rem] border border-green-500/50 shadow-2xl flex flex-col items-center gap-8 max-w-lg pointer-events-auto">
-               <div className="w-24 h-24 rounded-full bg-green-500/20 flex items-center justify-center animate-bounce">
-                  <i className="fa-solid fa-paper-plane text-4xl text-green-400"></i>
-               </div>
-               <div className="text-center">
-                  <h3 className="text-xs font-black uppercase tracking-[0.4em] text-green-400 mb-4">WhatsApp Sent</h3>
-                  <p className="text-xs opacity-40 mb-2">To: {messageHUD.to}</p>
-                  <p className="text-2xl font-light italic text-white/90">"{messageHUD.text}"</p>
-               </div>
-               <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                  <div className="h-full bg-green-500 animate-[loading_5s_linear]" />
+            {/* NEW MESSAGES HUD */}
+            <div className={`fixed inset-0 z-[100] flex items-center justify-center pointer-events-none transition-all duration-500 ${messageHUD.visible ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}>
+               <div className="glass p-12 rounded-[4rem] border border-blue-500/30 shadow-2xl flex flex-col items-center gap-10 max-w-xl pointer-events-auto">
+                  <div className={`w-24 h-24 rounded-full flex items-center justify-center animate-bounce ${messageHUD.type === 'incoming' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
+                     <i className={`fa-solid ${messageHUD.type === 'incoming' ? 'fa-comment-dots' : 'fa-paper-plane'} text-4xl`}></i>
+                  </div>
+                  <div className="text-center">
+                     <h3 className="text-[10px] font-black uppercase tracking-[0.5em] opacity-40 mb-6">{messageHUD.type === 'incoming' ? 'Incoming WhatsApp' : 'Dispatching WhatsApp'}</h3>
+                     <p className="text-xs font-black text-blue-400 mb-2 uppercase">Subject: {messageHUD.to}</p>
+                     <p className="text-3xl font-light italic text-white/90">"{messageHUD.text}"</p>
+                  </div>
+                  <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                     <div className="h-full bg-blue-500 shadow-[0_0_15px_#3b82f6] animate-[loading_4s_linear]" />
+                  </div>
                </div>
             </div>
-          </div>
 
-          <footer className="h-40 flex items-center justify-center gap-24 z-50 border-t border-white/5 bg-black/40 backdrop-blur-3xl px-20">
-              <i className="fa-solid fa-microchip text-4xl opacity-20 hover:opacity-100 cursor-pointer transition-all hover:scale-110"></i>
-              <i className="fa-solid fa-magnifying-glass text-4xl opacity-20 hover:opacity-100 cursor-pointer transition-all hover:scale-110"></i>
+            {/* MAIL READER HUD */}
+            <div className={`fixed right-12 top-48 w-96 glass p-10 rounded-[3rem] border border-white/10 transition-all duration-700 ${mailHUD.visible ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}`}>
+               <div className="flex items-center gap-4 mb-8">
+                  <i className="fa-solid fa-envelope-open-text text-blue-400"></i>
+                  <span className="text-[10px] font-black uppercase tracking-widest">Inbox Synchronized</span>
+               </div>
+               <div className="space-y-6">
+                  {mailHUD.items.map((mail, idx) => (
+                    <div key={idx} className="p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-blue-500/30 transition-all">
+                       <span className="text-[9px] font-black text-blue-400/60 uppercase">{mail.from}</span>
+                       <p className="text-xs text-white/80 mt-1">{mail.subject}</p>
+                    </div>
+                  ))}
+               </div>
+            </div>
+
+            {/* ROBOT FILE CREATOR HUD */}
+            <div className={`fixed bottom-44 right-12 w-[30rem] glass p-10 rounded-[3rem] border border-blue-500/20 transition-all duration-700 ${fileHUD.visible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'}`}>
+               <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-4">
+                     <i className="fa-solid fa-file-code text-blue-400 animate-pulse"></i>
+                     <span className="text-[10px] font-black uppercase tracking-widest">Robotic File Write: {fileHUD.name}</span>
+                  </div>
+                  <span className="text-xs font-black text-blue-400">{fileHUD.progress}%</span>
+               </div>
+               <div className="bg-black/40 p-6 rounded-2xl border border-white/5 mb-6 max-h-48 overflow-hidden">
+                  <pre className="text-[10px] text-green-400/60 font-mono leading-relaxed">
+                     {fileHUD.content.substring(0, Math.floor((fileHUD.progress / 100) * fileHUD.content.length))}
+                     <span className="inline-block w-2 h-4 bg-green-400 animate-pulse ml-1"></span>
+                  </pre>
+               </div>
+               <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 transition-all duration-200" style={{ width: `${fileHUD.progress}%` }} />
+               </div>
+            </div>
+          </main>
+
+          <footer className="h-44 flex items-center justify-center gap-28 z-50 border-t border-white/5 bg-black/60 backdrop-blur-3xl px-20">
+              <div className="flex flex-col items-center gap-2 group cursor-pointer" onClick={() => addTerminalLine("SYS_CHECK: MAIL_POLLING...")}>
+                 <i className="fa-solid fa-envelope text-3xl opacity-20 group-hover:opacity-100 group-hover:text-blue-400 transition-all"></i>
+                 <span className="text-[8px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-40">Mails</span>
+              </div>
               
               <div className="relative group cursor-pointer" onClick={state.isConnected ? () => {} : startSession}>
-                 <div className={`w-24 h-24 rounded-[2rem] flex items-center justify-center transition-all duration-700 ${state.isConnected ? 'bg-blue-600/30 border-blue-400/50 shadow-[0_0_80px_rgba(37,99,235,0.4)] scale-110 rotate-45' : 'bg-white/5 border border-white/10'}`}>
-                    <i className={`fa-solid fa-bolt text-4xl transition-transform duration-700 ${state.isConnected ? 'text-blue-400 -rotate-45' : 'text-white/10'}`}></i>
+                 <div className={`w-24 h-24 rounded-[2.5rem] flex items-center justify-center transition-all duration-700 ${state.isConnected ? 'bg-blue-600/20 border-blue-400/50 shadow-[0_0_100px_rgba(37,99,235,0.2)] scale-110' : 'bg-white/5 border border-white/10 hover:bg-white/10'}`}>
+                    <i className={`fa-solid fa-bolt text-4xl transition-all duration-700 ${state.isConnected ? 'text-blue-400' : 'text-white/10'}`}></i>
                  </div>
               </div>
 
-              <i className="fa-solid fa-database text-4xl opacity-20 hover:opacity-100 cursor-pointer transition-all hover:scale-110"></i>
-              <i className="fa-solid fa-gear text-4xl opacity-20 hover:opacity-100 cursor-pointer transition-all hover:scale-110"></i>
+              <div className="flex flex-col items-center gap-2 group cursor-pointer" onClick={() => addTerminalLine("SYS_CHECK: WHATSAPP_SOCKET_POLLING...")}>
+                 <i className="fa-brands fa-whatsapp text-4xl opacity-20 group-hover:opacity-100 group-hover:text-green-400 transition-all"></i>
+                 <span className="text-[8px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-40">Chat</span>
+              </div>
           </footer>
         </>
       )}
@@ -382,8 +422,8 @@ const App: React.FC = () => {
       <style>{`
         @keyframes scan { 0% { top: 0% } 100% { top: 100% } }
         @keyframes loading { from { width: 0% } to { width: 100% } }
-        .animate-fade-in { animation: fade-in 1s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        @keyframes fade-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fade-in { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+        .animate-fade-in { animation: fade-in 0.4s ease-out forwards; }
       `}</style>
     </div>
   );

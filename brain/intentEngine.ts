@@ -1,3 +1,12 @@
+import {
+  matchesAny,
+  extractNumber,
+  extractAppName,
+  extractContact,
+  extractMessage,
+  removeWakeWord
+} from './nlpHelpers';
+
 export type Intent =
   | { type: 'OPEN_APP'; app: string }
   | { type: 'VOLUME'; value: number }
@@ -9,48 +18,32 @@ export function detectIntent(rawText: string): Intent {
 
   const text = rawText.toLowerCase().trim();
 
-  // 1️⃣ Wake word check (human-style)
-  const wakeWords = ['bumba', 'hey bumba', 'ok bumba'];
-  const isAwake = wakeWords.some(w => text.includes(w));
-
-  if (!isAwake) {
+  // Wake word (brain attention)
+  if (!matchesAny(text, ['bumba', 'hey bumba', 'ok bumba'])) {
     return { type: 'CHAT', text: rawText };
   }
 
-  // Remove wake words
-  const cleanedText = wakeWords.reduce(
-    (t, w) => t.replace(w, ''),
-    text
-  ).trim();
+  const clean = removeWakeWord(text);
 
-  // 2️⃣ OPEN APP INTENT
-  if (matchesAny(cleanedText, ['open', 'launch', 'start'])) {
-    const app = extractAppName(cleanedText);
-    if (app) {
-      return { type: 'OPEN_APP', app };
+  // OPEN APP
+  if (matchesAny(clean, ['open', 'launch', 'start'])) {
+    const app = extractAppName(clean);
+    if (app) return { type: 'OPEN_APP', app };
+  }
+
+  // VOLUME
+  if (matchesAny(clean, ['volume', 'sound', 'voice'])) {
+    return { type: 'VOLUME', value: extractNumber(clean, 50) };
+  }
+
+  // SEND MESSAGE
+  if (matchesAny(clean, ['send', 'message', 'text'])) {
+    const to = extractContact(clean);
+    const msg = extractMessage(clean);
+    if (to && msg) {
+      return { type: 'SEND_MESSAGE', to, text: msg };
     }
   }
 
-  // 3️⃣ VOLUME INTENT
-  if (matchesAny(cleanedText, ['volume', 'sound', 'voice'])) {
-    const value = extractNumber(cleanedText, 50);
-    return { type: 'VOLUME', value };
-  }
-
-  // 4️⃣ SEND MESSAGE INTENT
-  if (matchesAny(cleanedText, ['send message', 'send msg', 'text'])) {
-    const to = extractContact(cleanedText);
-    const message = extractMessage(cleanedText);
-
-    if (to && message) {
-      return {
-        type: 'SEND_MESSAGE',
-        to,
-        text: message
-      };
-    }
-  }
-
-  // 5️⃣ Fallback → Chat
   return { type: 'CHAT', text: rawText };
 }
