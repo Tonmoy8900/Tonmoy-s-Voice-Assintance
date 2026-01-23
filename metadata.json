@@ -1,6 +1,6 @@
 {
-  "name": "Bumba AI Assistance",
-  "description": "Virtual Windows OS integration with high-tech messaging, Face ID login, and industrial QMS management.",
+  "name": "Tonmoy's AI Assistance",
+  "description": "Zero-latency AI Virtual Intelligent System. Advanced Windows OS integration with robotic file ops, messaging, and email management.",
   "requestFramePermissions": [
     "microphone",
     "camera",
