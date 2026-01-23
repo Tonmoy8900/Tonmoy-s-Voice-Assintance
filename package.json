@@ -13,8 +13,7 @@
     "react-dom": "19.0.0",
     "d3": "7.9.0",
     "recharts": "2.12.7",
-    "@google/genai": "1.38.0",
-    "child_process": "^1.0.2"
+    "@google/genai": "1.38.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

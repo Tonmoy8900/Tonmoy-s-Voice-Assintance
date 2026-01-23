@@ -5,50 +5,40 @@ import { Transcription, SystemStatus } from './types';
 import { decode, decodeAudioData, createBlob } from './audioUtils';
 import Visualizer from './services/Visualizer';
 
-interface MailItem {
-  id: string;
-  from: string;
-  subject: string;
-  priority: 'High' | 'Normal';
-}
-
 interface WhatsAppMsg {
   sender: string;
   text: string;
   time: string;
-}
-
-interface PendingAction {
-  id: string;
-  type: 'DELETE' | 'SEND_MESSAGE' | 'FILE_OPS' | 'CREATE_FILE';
-  description: string;
-  data: any;
-  callId: string;
+  status: 'unread' | 'read';
 }
 
 interface AppState extends SystemStatus {
   battery: number;
   cpuUsage: number;
+  ramUsage: number;
   isOnline: boolean;
   activeApp: string;
   isAuthenticated: boolean;
   isScanningFace: boolean;
+  isSyncing: boolean;
 }
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
-    volume: 50,
-    brightness: 80,
+    volume: 75,
+    brightness: 90,
     theme: 'dark',
     isConnected: false,
     isListening: false,
     battery: 92,
     isSharingScreen: false,
-    cpuUsage: 4,
+    cpuUsage: 12,
+    ramUsage: 28,
     isOnline: navigator.onLine,
-    activeApp: 'ZAVIS Global',
+    activeApp: 'ZAVIS Master Frame',
     isAuthenticated: false,
-    isScanningFace: false
+    isScanningFace: false,
+    isSyncing: false
   });
 
   const [history, setHistory] = useState<Transcription[]>([]);
@@ -57,387 +47,352 @@ const App: React.FC = () => {
   const [terminalLines, setTerminalLines] = useState<string[]>([]);
   const [liveVoiceInput, setLiveVoiceInput] = useState<string>('');
   
-  const [waHUD, setWaHUD] = useState({ 
-    visible: false, 
-    messages: [] as WhatsAppMsg[], 
-    mode: 'read' as 'read' | 'send' | 'summarize',
-    isProcessing: false,
-    summary: ''
-  });
-  const [fileHUD, setFileHUD] = useState({ 
-    visible: false, 
-    name: '', 
-    content: '', 
-    cursor: 0, 
-    action: 'CREATE' as 'CREATE' | 'DELETE' | 'FOLDER'
-  });
-  const [confirmation, setConfirmation] = useState<PendingAction | null>(null);
+  const [waHUD, setWaHUD] = useState({ visible: false, messages: [] as WhatsAppMsg[] });
+  const [sysHUD, setSysHUD] = useState({ visible: false, task: '', progress: 0 });
 
+  const historyEndRef = useRef<HTMLDivElement>(null);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const analyzerRef = useRef<AnalyserNode | null>(null);
-  const sessionPromiseRef = useRef<any>(null);
+  const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const transcriptionBufferRef = useRef({ user: '', assistant: '' });
-  // Store active audio sources to allow stopping them on interruption
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // Auto-scroll chat history
+  useEffect(() => {
+    historyEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [history, liveVoiceInput, isThinking]);
+
   const addTerminalLine = (line: string) => {
-    const time = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' });
-    setTerminalLines(prev => [...prev.slice(-10), `→ ${line}`]);
+    setTerminalLines(prev => [...prev.slice(-8), `[${new Date().toLocaleTimeString([], {hour12: false, second:'2-digit'})}] ${line}`]);
+  };
+
+  const mockWhatsAppMessages: WhatsAppMsg[] = [
+    { sender: 'Manager Rahul', text: 'Bumba, please update the kernel logs.', time: '18:42', status: 'unread' },
+    { sender: 'Priya', text: 'The sync is successful. See you.', time: '18:45', status: 'unread' }
+  ];
+
+  const zavisTools: FunctionDeclaration[] = [
+    {
+      name: 'globalSystemSync',
+      parameters: {
+        type: Type.OBJECT,
+        description: 'Auto-sync Windows systems, WhatsApp, and hardware resources.',
+        properties: {
+          focus: { type: Type.STRING, enum: ['system', 'messaging', 'full'] }
+        },
+        required: ['focus']
+      }
+    }
+  ];
+
+  const triggerGlobalSync = async () => {
+    setState(s => ({ ...s, isSyncing: true }));
+    addTerminalLine("INIT: Bumba Global Sync Pulse...");
+    setSysHUD({ visible: true, task: 'Secure Handshake', progress: 10 });
+    await new Promise(r => setTimeout(r, 600));
+    setSysHUD(h => ({ ...h, task: 'Fetching WhatsApp Data', progress: 45 }));
+    setWaHUD({ visible: true, messages: mockWhatsAppMessages });
+    await new Promise(r => setTimeout(r, 800));
+    setSysHUD(h => ({ ...h, task: 'Optimizing Kernel RAM', progress: 85 }));
+    setState(s => ({ ...s, ramUsage: 22, cpuUsage: 6 }));
+    await new Promise(r => setTimeout(r, 400));
+    setSysHUD(h => ({ ...h, task: 'Sync Complete', progress: 100 }));
+    addTerminalLine("SYNC: All sub-systems synchronized.");
+    setState(s => ({ ...s, isSyncing: false }));
+    setTimeout(() => {
+        setSysHUD(h => ({ ...h, visible: false }));
+        setWaHUD(h => ({ ...h, visible: false }));
+    }, 8000);
   };
 
   const startFaceID = async () => {
     setState(s => ({ ...s, isScanningFace: true }));
-    addTerminalLine("SYS: Bio-Auth Requested");
-    
+    addTerminalLine("AUTH: FaceID Matrix Booting...");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.play();
       }
-      
       setTimeout(() => {
-        addTerminalLine("SYS: Identity Verified");
+        addTerminalLine("AUTH: Access Granted. Welcome Home.");
         setState(s => ({ ...s, isAuthenticated: true, isScanningFace: false }));
         if (stream) stream.getTracks().forEach(t => t.stop());
         startSession(); 
       }, 2000);
     } catch (e) {
-      addTerminalLine("ERR: Sensor Link Failed");
+      addTerminalLine("AUTH_ERR: Identity validation failed.");
       setState(s => ({ ...s, isScanningFace: false }));
     }
   };
 
-  const zavisTools: FunctionDeclaration[] = [
-    {
-      name: 'fileSystemRobot',
-      parameters: {
-        type: Type.OBJECT,
-        properties: {
-          action: { type: Type.STRING, enum: ['create_file', 'create_folder', 'delete_file'] },
-          path: { type: Type.STRING },
-          content: { type: Type.STRING }
-        },
-        required: ['action', 'path']
-      }
-    },
-    {
-      name: 'whatsappEngine',
-      parameters: {
-        type: Type.OBJECT,
-        properties: {
-          mode: { type: Type.STRING, enum: ['read', 'send', 'summarize'] },
-          contact: { type: Type.STRING },
-          message: { type: Type.STRING }
-        },
-        required: ['mode']
-      }
-    }
-  ];
-
-  const handleConfirmation = (choice: 'YES' | 'CANCEL') => {
-    if (!confirmation) return;
-    if (choice === 'YES') {
-      addTerminalLine(`EXEC: ${confirmation.type}`);
-      if (confirmation.type === 'CREATE_FILE') {
-        setFileHUD({ visible: true, name: confirmation.data.path, content: confirmation.data.content || '', cursor: 0, action: 'CREATE' });
-        let i = 0;
-        const interval = setInterval(() => {
-          i += 8;
-          setFileHUD(h => ({ ...h, cursor: i }));
-          if (i >= (confirmation.data.content?.length || 0)) {
-            clearInterval(interval);
-            setTimeout(() => setFileHUD(h => ({ ...h, visible: false })), 2000);
-          }
-        }, 30);
-      }
-      sessionPromiseRef.current?.then((session: any) => session.sendToolResponse({
-        functionResponses: { id: confirmation.callId, name: 'confirmAction', response: { result: 'Success' } }
-      }));
-    }
-    setConfirmation(null);
-  };
-
   const startSession = async () => {
     try {
-      addTerminalLine("ZAVIS: Global Sync Active");
-      // Create a new instance right before connecting to ensure current API key usage
+      if (!process.env.API_KEY) {
+        if (window.aistudio) await window.aistudio.openSelectKey();
+        return;
+      }
+      addTerminalLine("ZAVIS: Pulse active. Say 'Hey Bumba'.");
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      inputAudioContextRef.current = new AudioContext({ sampleRate: 16000 });
+      outputAudioContextRef.current = new AudioContext({ sampleRate: 24000 });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      sessionPromiseRef.current = ai.live.connect({
+      const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } },
-          systemInstruction: `You are ZAVIS Global. A professional, multilingual AI system. 
-          Use 'fileSystemRobot' to create or manage files. If details are missing, ask the user.
-          Always confirm sensitive actions. Tone is refined, expert, and calm.`,
+          systemInstruction: `You are ZAVIS, the elite voice interface for Tonmoy's Windows Laptop.
+          WAKE WORD: Your name is Bumba. When you hear "Hey Bumba" or "Bumba", immediately call 'globalSystemSync'.
+          PERSONALITY: Futuristic, human-like, and highly intelligent. Use Hinglish naturally. 
+          Respond concisely but professionally. You have full control over the laptop's systems.`,
           tools: [{ functionDeclarations: zavisTools }],
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         },
         callbacks: {
-          onopen: () => {
-            setState(s => ({ ...s, isConnected: true, isListening: true }));
-            const source = inputAudioContextRef.current!.createMediaStreamSource(stream);
-            analyzerRef.current = inputAudioContextRef.current!.createAnalyser();
-            const processor = inputAudioContextRef.current!.createScriptProcessor(2048, 1, 1);
-            processor.onaudioprocess = (e) => {
-              // Ensure we send audio data using the resolved session promise to avoid race conditions
-              sessionPromiseRef.current?.then((session: any) => session.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) }));
-            };
-            source.connect(analyzerRef.current);
-            source.connect(processor);
-            processor.connect(inputAudioContextRef.current!.destination);
-          },
+          onopen: () => setState(s => ({ ...s, isConnected: true, isListening: true })),
           onmessage: async (message: LiveServerMessage) => {
             if (message.serverContent?.inputTranscription) {
               const text = message.serverContent.inputTranscription.text;
               transcriptionBufferRef.current.user += text;
               setLiveVoiceInput(transcriptionBufferRef.current.user);
+              setIsThinking(true);
             }
-            if (message.serverContent?.outputTranscription) {
-              const text = message.serverContent.outputTranscription.text;
-              transcriptionBufferRef.current.assistant += text;
+            if (message.serverContent?.modelTurn) { 
+                setIsThinking(false); 
+                setIsAITalking(true); 
+                transcriptionBufferRef.current.assistant += message.serverContent.modelTurn.parts[0]?.text || '';
             }
             if (message.serverContent?.turnComplete) {
               const { user, assistant } = transcriptionBufferRef.current;
-              if (user || assistant) setHistory(p => [...p, { text: user || assistant, sender: user ? 'user' : 'assistant', timestamp: Date.now() }]);
+              if (user) setHistory(p => [...p, { text: user, sender: 'user', timestamp: Date.now() }]);
+              if (assistant) setHistory(p => [...p, { text: assistant, sender: 'assistant', timestamp: Date.now() }]);
               transcriptionBufferRef.current = { user: '', assistant: '' };
               setLiveVoiceInput('');
               setIsAITalking(false);
-              setIsThinking(false);
             }
 
-            // Handle model interruptions by stopping all queued audio
-            const interrupted = message.serverContent?.interrupted;
-            if (interrupted) {
-              for (const source of audioSourcesRef.current.values()) {
-                try { source.stop(); } catch(e) {}
-                audioSourcesRef.current.delete(source);
+            if (message.toolCall) {
+              for (const fc of message.toolCall.functionCalls) {
+                if (fc.name === 'globalSystemSync') {
+                  await triggerGlobalSync();
+                  sessionPromise.then(s => s.sendToolResponse({
+                    functionResponses: { id: fc.id, name: fc.name, response: { result: "Sync procedure successful." } }
+                  }));
+                }
               }
-              nextStartTimeRef.current = 0;
             }
 
             const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (base64Audio) {
-              setIsAITalking(true);
               const ctx = outputAudioContextRef.current!;
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
               const audioBuffer = await decodeAudioData(decode(base64Audio), ctx, 24000, 1);
               const source = ctx.createBufferSource();
               source.buffer = audioBuffer;
               source.connect(ctx.destination);
-              
-              source.addEventListener('ended', () => {
-                audioSourcesRef.current.delete(source);
-              });
-
-              // Schedule playback for gapless audio
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += audioBuffer.duration;
               audioSourcesRef.current.add(source);
             }
-
-            if (message.toolCall) {
-              for (const fc of message.toolCall.functionCalls) {
-                if (fc.name === 'fileSystemRobot') {
-                  setConfirmation({ id: 'f-c', type: 'CREATE_FILE', description: `Initialize ${fc.args.path}?`, data: fc.args, callId: fc.id });
-                }
-              }
-            }
           },
-          onerror: (e) => {
-            console.error('Session Error:', e);
-            addTerminalLine("SYS: Core Link Error");
-          },
-          onclose: () => {
-             setState(s => ({ ...s, isConnected: false, isListening: false }));
-             addTerminalLine("SYS: Session Closed");
-          }
+          onerror: () => addTerminalLine("CORE_ERR: Neural Link Severed"),
+          onclose: () => setState(s => ({ ...s, isConnected: false }))
         }
       });
+      sessionPromiseRef.current = sessionPromise;
+      const processor = inputAudioContextRef.current!.createScriptProcessor(512, 1, 1);
+      processor.onaudioprocess = (e) => {
+        sessionPromise.then(s => s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) })).catch(() => {});
+      };
+      const source = inputAudioContextRef.current!.createMediaStreamSource(stream);
+      analyzerRef.current = inputAudioContextRef.current!.createAnalyser();
+      source.connect(analyzerRef.current);
+      source.connect(processor);
+      processor.connect(inputAudioContextRef.current!.destination);
     } catch (e) {
-      addTerminalLine("SYS: Core Link Error");
+      addTerminalLine("BOOT_ERR: Initialization failed.");
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#020202] text-slate-100 font-sans relative overflow-hidden">
-      {/* Refined Ambient Background */}
-      <div className="absolute inset-0 opacity-40 pointer-events-none">
-        <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-600/10 blur-[180px] rounded-full"></div>
-        <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-indigo-600/10 blur-[180px] rounded-full"></div>
-      </div>
-
-      {!state.isAuthenticated && !state.isScanningFace ? (
-        <div className="flex flex-col items-center justify-center min-h-screen">
-          <button 
-            onClick={startFaceID}
-            className="group relative flex flex-col items-center gap-8"
-          >
-            <div className="w-40 h-40 rounded-full glass border border-white/10 flex items-center justify-center transition-all duration-700 group-hover:scale-105 group-hover:border-blue-500/30 group-hover:shadow-[0_0_80px_rgba(59,130,246,0.2)]">
-              <i className="fa-solid fa-fingerprint text-5xl text-blue-400 group-hover:animate-pulse"></i>
+    <div className="min-h-screen bg-transparent text-slate-100 flex overflow-hidden">
+      {!state.isAuthenticated ? (
+        <div className="flex-1 flex flex-col items-center justify-center z-10 p-10 bg-[#020202]">
+          <button onClick={state.isScanningFace ? undefined : startFaceID} className="group relative flex flex-col items-center gap-16">
+            <div className={`w-72 h-72 rounded-full glass glow-border flex items-center justify-center transition-all duration-1000 ${state.isScanningFace ? 'scale-110 shadow-[0_0_150px_rgba(59,130,246,0.3)]' : 'group-hover:scale-105 group-hover:bg-white/5'}`}>
+              {state.isScanningFace ? <video ref={videoRef} className="w-full h-full rounded-full object-cover grayscale scale-x-[-1]" /> : <i className="fa-solid fa-microchip text-8xl text-blue-500/80 group-hover:text-blue-400 transition-colors"></i>}
             </div>
-            <div className="text-center space-y-2">
-              <h1 className="text-3xl font-extrabold tracking-[0.4em] text-white">ZAVIS</h1>
-              <p className="text-[10px] uppercase tracking-[0.2em] opacity-40">Identity Authentication Required</p>
+            <div className="text-center">
+              <h1 className="text-7xl font-black tracking-[1em] text-gradient mb-4">ZAVIS</h1>
+              <p className="text-[11px] uppercase tracking-[0.6em] text-blue-500 font-bold opacity-60">Identity Matrix Verification</p>
             </div>
           </button>
         </div>
-      ) : state.isScanningFace ? (
-        <div className="flex flex-col items-center justify-center min-h-screen gap-16">
-          <div className="relative w-[32rem] h-[32rem] rounded-full overflow-hidden border border-white/5 shadow-2xl glass">
-            <video ref={videoRef} className="w-full h-full object-cover grayscale brightness-110 scale-x-[-1]" />
-            <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full animate-pulse"></div>
-            <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle,transparent_50%,rgba(0,0,0,0.4)_100%)]"></div>
-          </div>
-          <p className="text-sm font-semibold tracking-[0.5em] text-blue-400 uppercase animate-pulse">Authenticating...</p>
-        </div>
       ) : (
         <>
-          {/* Top Global Navigation Bar */}
-          <header className="fixed top-0 left-0 right-0 h-24 px-12 flex justify-between items-center z-50">
-            <div className="flex items-center gap-6">
-              <div className="w-10 h-10 rounded-xl glass border border-white/10 flex items-center justify-center">
-                <i className="fa-solid fa-shapes text-blue-400"></i>
+          {/* LEFT: Neural Monitoring Matrix */}
+          <aside className="w-[28%] h-full p-10 flex flex-col gap-8 z-20 glass border-r border-white/5">
+            <div className="flex items-center gap-6 mb-4">
+              <div className="w-14 h-14 rounded-2xl bg-blue-600/10 border border-blue-500/30 flex items-center justify-center shadow-inner">
+                <i className="fa-solid fa-shield-halved text-blue-400 text-2xl"></i>
               </div>
-              <span className="text-xs font-bold tracking-[0.3em] uppercase opacity-80">Zavis Global</span>
-            </div>
-            <div className="flex items-center gap-8 text-[10px] font-bold tracking-widest uppercase opacity-40">
-              <div className="flex flex-col items-end">
-                <span>System Load</span>
-                <span className="text-blue-400 mt-0.5">{state.cpuUsage}%</span>
-              </div>
-              <div className="w-px h-8 bg-white/10"></div>
-              <div className="flex flex-col items-end">
-                <span>Energy</span>
-                <span className="text-emerald-400 mt-0.5">{state.battery}%</span>
-              </div>
-            </div>
-          </header>
-
-          <main className="flex-1 flex flex-col items-center justify-center min-h-screen pt-24">
-            <div className="relative transform scale-100 transition-all duration-1000">
-               <Visualizer 
-                  isActive={state.isConnected} 
-                  isAITalking={isAITalking} 
-                  analyzer={analyzerRef.current || undefined} 
-                  volume={state.volume} 
-                  brightness={state.brightness} 
-                  battery={state.battery} 
-                  isSharingScreen={state.isSharingScreen} 
-                  cpuUsage={state.cpuUsage} 
-                  isOnline={state.isOnline} 
-               />
-               {isThinking && (
-                 <div className="absolute inset-0 flex items-center justify-center">
-                   <div className="w-64 h-64 border border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-                 </div>
-               )}
-            </div>
-
-            <div className="text-center mt-12 max-w-4xl px-8 z-10 transition-all duration-1000">
-              <h1 className={`text-6xl font-extrabold tracking-tight transition-all duration-700 ${isAITalking ? 'text-blue-400 scale-105' : 'text-white'}`}>
-                {isAITalking ? "ZAVIS" : (state.isConnected ? "At your service" : "Link Established")}
-              </h1>
-              <div className="mt-8 space-y-4">
-                {history.slice(-1).map((h, i) => (
-                   <p key={i} className={`text-2xl font-light tracking-wide transition-all ${h.sender === 'user' ? 'opacity-20 italic' : 'opacity-80'}`}>
-                      {h.text}
-                   </p>
-                ))}
+              <div>
+                <h2 className="text-xl font-bold tracking-tight text-white uppercase">Bumba v5.0</h2>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10b981]"></span>
+                  <span className="text-[10px] font-black tracking-widest text-emerald-500 uppercase">Neural Link Stable</span>
+                </div>
               </div>
             </div>
 
-            {/* Voice Prompt HUD (Right Side) */}
-            <div className={`fixed right-12 top-1/2 -translate-y-1/2 w-[24rem] transition-all duration-700 z-50 ${liveVoiceInput ? 'translate-x-0 opacity-100' : 'translate-x-20 opacity-0 pointer-events-none'}`}>
-               <div className="glass p-12 rounded-[2.5rem] border border-white/10 shadow-2xl relative overflow-hidden">
-                  <div className="flex items-center gap-4 mb-6 opacity-40">
-                     <i className="fa-solid fa-microphone text-blue-400 animate-pulse text-xs"></i>
-                     <span className="text-[9px] font-bold uppercase tracking-[0.4em]">Live Transcription</span>
-                  </div>
-                  <p className="text-xl font-medium leading-relaxed text-slate-100">
-                     {liveVoiceInput}
-                     <span className="inline-block w-1.5 h-6 bg-blue-500/50 ml-2 animate-pulse align-middle rounded-full"></span>
-                  </p>
-               </div>
-            </div>
+            <div className="flex-1 flex flex-col gap-6 overflow-hidden">
+              {/* Sync Status HUD */}
+              <div className={`glass p-8 rounded-[3rem] border border-white/5 transition-all duration-700 ${sysHUD.visible ? 'scale-100 opacity-100' : 'scale-95 opacity-40 blur-[1px]'}`}>
+                <div className="flex justify-between items-center mb-6">
+                    <span className="text-[10px] font-black tracking-widest uppercase opacity-40">Matrix Sync</span>
+                    <i className={`fa-solid fa-sync text-blue-400 ${state.isSyncing ? 'animate-spin' : ''}`}></i>
+                </div>
+                <h3 className="text-sm font-bold text-blue-100 mb-4">{sysHUD.task || 'System Idle'}</h3>
+                <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mb-6">
+                    <div className="h-full bg-blue-500 transition-all duration-500 shadow-[0_0_10px_#3b82f6]" style={{ width: `${sysHUD.progress}%` }}></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
+                        <span className="block text-[8px] opacity-30 font-black mb-1">CPU LOAD</span>
+                        <span className="text-xs font-bold text-blue-400">{state.cpuUsage}%</span>
+                    </div>
+                    <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
+                        <span className="block text-[8px] opacity-30 font-black mb-1">RAM SWAP</span>
+                        <span className="text-xs font-bold text-emerald-400">{state.ramUsage}%</span>
+                    </div>
+                </div>
+              </div>
 
-            {/* System Log HUD (Left Side) */}
-            <div className="fixed left-12 bottom-36 w-80 glass p-8 rounded-[2rem] border border-white/5 opacity-40 hover:opacity-100 transition-opacity duration-500">
-               <h3 className="text-[9px] font-bold uppercase tracking-[0.3em] mb-6 opacity-60">System Log</h3>
-               <div className="space-y-3">
+              {/* Real-time Terminal Logs */}
+              <div className="flex-1 glass p-8 rounded-[3rem] border border-white/5 flex flex-col overflow-hidden">
+                <span className="text-[10px] font-black tracking-widest uppercase opacity-40 mb-6">Kernel Bridge Stream</span>
+                <div className="flex-1 space-y-3 font-mono overflow-y-auto pr-4 scrollbar-hide">
                   {terminalLines.map((line, i) => (
-                    <div key={i} className="text-[10px] font-medium tracking-wide border-l border-white/10 pl-4 py-0.5 text-slate-400">
-                       {line}
+                    <div key={i} className="text-[10px] font-semibold text-slate-500/80 leading-relaxed border-l-2 border-blue-500/10 pl-3">
+                      {line}
                     </div>
                   ))}
-               </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          {/* CENTER: The Cosmic Core */}
+          <main className="flex-1 flex flex-col items-center justify-center relative z-10 p-12">
+            <div className={`transition-all duration-1000 ${isThinking ? 'scale-110 drop-shadow-[0_0_100px_rgba(59,130,246,0.15)]' : 'scale-100'}`}>
+              <Visualizer isActive={state.isConnected} isAITalking={isAITalking || isThinking} analyzer={analyzerRef.current || undefined} volume={state.volume} brightness={state.brightness} battery={state.battery} isSharingScreen={state.isSharingScreen} cpuUsage={state.cpuUsage} isOnline={state.isOnline} />
             </div>
 
-            {/* Confirmation Dialog */}
-            {confirmation && (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xl">
-                <div className="glass p-16 rounded-[3rem] border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.5)] flex flex-col items-center gap-10 max-w-lg text-center float-anim">
-                  <div className="w-20 h-20 rounded-full bg-blue-500/10 flex items-center justify-center">
-                    <i className="fa-solid fa-shield-check text-3xl text-blue-400"></i>
-                  </div>
-                  <div className="space-y-4">
-                    <h3 className="text-xs font-bold uppercase tracking-[0.4em] opacity-40">Security Request</h3>
-                    <p className="text-xl font-semibold">{confirmation.description}</p>
-                  </div>
-                  <div className="flex gap-6 w-full mt-4">
-                    <button onClick={() => handleConfirmation('YES')} className="flex-1 py-5 bg-blue-600 rounded-2xl font-bold uppercase tracking-widest text-xs hover:bg-blue-500 transition-all shadow-xl shadow-blue-600/20">Verify</button>
-                    <button onClick={() => handleConfirmation('CANCEL')} className="flex-1 py-5 bg-white/5 border border-white/10 rounded-2xl font-bold uppercase tracking-widest text-xs hover:bg-white/10 transition-all">Dismiss</button>
-                  </div>
-                </div>
-              </div>
-            )}
+            <div className="mt-8 text-center max-w-lg z-20">
+              <h1 className={`text-5xl font-black tracking-tighter transition-all duration-700 ${isAITalking ? 'text-blue-400' : isThinking ? 'text-indigo-400' : 'text-white/30'}`}>
+                {isAITalking ? "ZAVIS ACTIVE" : isThinking ? "PROCESSING..." : "ZAVIS READY"}
+              </h1>
+            </div>
 
-            {/* Robotic Process HUD */}
-            <div className={`fixed right-12 bottom-36 w-96 glass p-10 rounded-[2.5rem] border border-blue-500/20 transition-all duration-700 ${fileHUD.visible ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'}`}>
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-4">
-                  <i className="fa-solid fa-pen-nib text-blue-400"></i>
-                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-80">Writing: {fileHUD.name}</span>
-                </div>
-                <span className="text-xs font-bold tabular-nums opacity-40">{Math.floor((fileHUD.cursor / (fileHUD.content.length || 1)) * 100)}%</span>
-              </div>
-              <div className="bg-white/5 p-6 rounded-2xl h-32 overflow-hidden text-[11px] font-medium leading-relaxed opacity-60">
-                {fileHUD.content.substring(0, fileHUD.cursor)}
-                <span className="inline-block w-1.5 h-4 bg-blue-400 ml-1 animate-pulse"></span>
-              </div>
+            {/* Neural Control Console */}
+            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 glass px-12 py-8 rounded-full border border-white/10 flex items-center gap-24 shadow-[0_0_60px_rgba(0,0,0,0.5)] transition-all hover:scale-105">
+                <button onClick={() => triggerGlobalSync()} className="text-2xl opacity-40 hover:opacity-100 transition-all hover:text-blue-400 hover:scale-125">
+                    <i className="fa-solid fa-arrows-rotate"></i>
+                </button>
+                <button onClick={state.isConnected ? undefined : startSession} className={`w-28 h-28 rounded-full flex items-center justify-center transition-all duration-1000 relative ${state.isConnected ? 'bg-blue-600 shadow-[0_0_120px_rgba(59,130,246,0.6)] scale-110' : 'bg-white/5 hover:bg-white/10'}`}>
+                    <i className={`fa-solid fa-microphone-lines text-4xl ${state.isConnected ? 'text-white' : 'text-white/20'}`}></i>
+                    {state.isConnected && <div className="absolute inset-[-18px] border-4 border-blue-500/20 rounded-full animate-ping"></div>}
+                </button>
+                <button onClick={() => setWaHUD(h => ({ ...h, visible: !h.visible }))} className={`text-2xl transition-all hover:scale-125 ${waHUD.visible ? 'text-emerald-400 opacity-100' : 'opacity-40 hover:text-emerald-400'}`}>
+                    <i className="fa-brands fa-whatsapp"></i>
+                </button>
             </div>
           </main>
 
-          {/* Minimalist Global Footer */}
-          <footer className="fixed bottom-0 left-0 right-0 h-32 flex items-center justify-center gap-24 z-50">
-            <div className="flex items-center gap-20 glass px-16 py-6 rounded-full border border-white/5 shadow-2xl">
-              <button className="text-2xl opacity-20 hover:opacity-100 transition-all hover:text-blue-400">
-                <i className="fa-solid fa-paper-plane"></i>
-              </button>
-              
-              <button 
-                onClick={state.isConnected ? () => {} : startSession}
-                className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-700 ${state.isConnected ? 'bg-blue-600 shadow-[0_0_40px_rgba(59,130,246,0.4)] scale-110' : 'bg-white/10 hover:bg-white/20'}`}
-              >
-                <i className={`fa-solid fa-microphone-lines text-2xl transition-all ${state.isConnected ? 'text-white' : 'text-white/40'}`}></i>
-              </button>
-
-              <button className="text-2xl opacity-20 hover:opacity-100 transition-all hover:text-emerald-400">
-                <i className="fa-brands fa-whatsapp"></i>
-              </button>
+          {/* RIGHT: Kinetic Communication Log */}
+          <aside className="w-[32%] h-full p-10 flex flex-col z-20 glass border-l border-white/5 shadow-[-20px_0_50px_rgba(0,0,0,0.4)]">
+            <div className="flex items-center justify-between mb-10 pb-6 border-b border-white/5">
+                <span className="text-[11px] font-black tracking-[0.6em] uppercase text-blue-500/60">Neural Transcript</span>
+                <span className="text-[9px] font-black text-white bg-blue-600 px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg shadow-blue-900/40">Continuity: ON</span>
             </div>
-          </footer>
+
+            <div className="flex-1 overflow-y-auto pr-6 space-y-12 custom-scroll pb-44 scroll-smooth">
+                {history.map((msg, idx) => (
+                    <div key={idx} className={`flex flex-col gap-4 animate-in fade-in slide-in-from-right-8 duration-500 ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                        <div className="flex items-center gap-3">
+                            {msg.sender === 'assistant' && <div className="w-5 h-5 rounded-full bg-blue-600/20 border border-blue-500/40 flex items-center justify-center"><i className="fa-solid fa-bolt text-[8px] text-blue-400"></i></div>}
+                            <span className="text-[9px] font-black uppercase tracking-widest opacity-30">
+                                {msg.sender === 'user' ? 'Master Tonmoy' : 'ZAVIS Interface'} • {new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                            </span>
+                        </div>
+                        <div className={`p-7 rounded-[2.5rem] max-w-[95%] glass shadow-2xl relative ${msg.sender === 'user' ? 'bg-blue-600/10 border-blue-500/20 text-blue-100 text-right rounded-tr-none' : 'bg-white/[0.03] border-white/10 text-slate-200 rounded-tl-none'}`}>
+                            <p className="text-[15px] font-medium leading-relaxed tracking-wide">{msg.text}</p>
+                        </div>
+                    </div>
+                ))}
+                
+                {liveVoiceInput && (
+                    <div className="flex flex-col items-end gap-4 opacity-60">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-blue-400 animate-pulse">Capturing Voice...</span>
+                        <div className="p-7 rounded-[2.5rem] rounded-tr-none glass bg-indigo-600/5 border-indigo-500/20 text-indigo-100 italic">
+                            <p className="text-[15px] font-medium tracking-wide">{liveVoiceInput}</p>
+                        </div>
+                    </div>
+                )}
+                
+                {isThinking && (
+                    <div className="flex flex-col items-start gap-4 animate-pulse">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Analyzing Logic...</span>
+                        <div className="flex gap-3 p-6 glass rounded-full rounded-tl-none bg-white/5 border-white/10">
+                            <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.32s]"></span>
+                            <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.16s]"></span>
+                            <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></span>
+                        </div>
+                    </div>
+                )}
+                <div ref={historyEndRef} />
+            </div>
+          </aside>
+
+          {/* Floating WhatsApp Quick-HUD */}
+          <div className={`fixed bottom-40 right-[35%] w-[24rem] transition-all duration-700 z-[100] ${waHUD.visible ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-20 opacity-0 scale-95 pointer-events-none'}`}>
+             <div className="glass p-10 rounded-[3.5rem] border border-emerald-500/30 shadow-2xl backdrop-blur-3xl overflow-hidden">
+                <div className="flex items-center gap-5 mb-8 text-emerald-400">
+                   <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+                      <i className="fa-brands fa-whatsapp text-xl"></i>
+                   </div>
+                   <span className="text-xs font-black uppercase tracking-[0.4em]">Neural Inbox Sync</span>
+                </div>
+                <div className="space-y-4">
+                   {waHUD.messages.map((m, i) => (
+                     <div key={i} className="bg-white/5 p-5 rounded-3xl border border-white/5 flex flex-col gap-2 hover:bg-white/10 transition-colors group">
+                        <div className="flex justify-between items-center">
+                            <span className="text-[13px] font-bold text-emerald-400">{m.sender}</span>
+                            <span className="text-[10px] opacity-30 font-bold">{m.time}</span>
+                        </div>
+                        <p className="text-xs opacity-60 line-clamp-1 leading-relaxed">{m.text}</p>
+                     </div>
+                   ))}
+                </div>
+             </div>
+          </div>
         </>
       )}
+
+      <style>{`
+        .animate-spin-slow { animation: spin 5s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .custom-scroll::-webkit-scrollbar { width: 3px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.2); border-radius: 10px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+      `}</style>
     </div>
   );
 };

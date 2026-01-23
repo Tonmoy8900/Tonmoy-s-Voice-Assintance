@@ -1,6 +1,5 @@
 
 import React, { useEffect, useRef } from 'react';
-// Use named imports to resolve D3 type issues where properties might not be found on the default export
 import { select, mean, lineRadial, curveBasisClosed } from 'd3';
 
 interface VisualizerProps {
@@ -31,15 +30,15 @@ const Visualizer: React.FC<VisualizerProps> = ({
   useEffect(() => {
     if (!svgRef.current) return;
 
-    const width = 500;
-    const height = 500;
-    // Use named 'select' instead of 'd3.select'
+    const width = 600;
+    const height = 600;
     const svg = select(svgRef.current);
     svg.selectAll('*').remove();
 
     const defs = svg.append('defs');
-    const filterId = 'global-glow';
-    const filter = defs.append('filter').attr('id', filterId);
+    
+    // Core glow filter
+    const filter = defs.append('filter').attr('id', 'core-glow');
     filter.append('feGaussianBlur').attr('stdDeviation', 12).attr('result', 'blur');
     const feMerge = filter.append('feMerge');
     feMerge.append('feMergeNode').attr('in', 'blur');
@@ -47,29 +46,45 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
     const group = svg.append('g').attr('transform', `translate(${width / 2}, ${height / 2})`);
 
-    // Global Style Color Palette (Sophisticated Deep Blues & Indigos)
+    // Orbital Rings
+    const rings = [160, 185, 210].map((radius, i) => {
+        return group.append('circle')
+            .attr('r', radius)
+            .attr('fill', 'none')
+            .attr('stroke', i === 1 ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255, 255, 255, 0.03)')
+            .attr('stroke-width', 1)
+            .attr('stroke-dasharray', i === 1 ? '5, 15' : '2, 10');
+    });
+
+    // Satellites
+    const satellites = [0, 1, 2].map(i => {
+        return group.append('circle')
+            .attr('r', 3)
+            .attr('fill', i === 0 ? '#3b82f6' : '#10b981')
+            .attr('opacity', 0.6);
+    });
+
     const colors = [
-      ['#2563eb', '#1e40af'], // Primary Blue
-      ['#4f46e5', '#3730a3'], // Indigo
-      ['#0ea5e9', '#0369a1']  // Sky
+      ['#3b82f6', '#1d4ed8'], 
+      ['#6366f1', '#4338ca'], 
+      ['#22d3ee', '#0891b2']  
     ];
     
     const blobs = colors.map((c, i) => {
       const gradId = `grad-${i}`;
       const grad = defs.append('radialGradient').attr('id', gradId);
-      grad.append('stop').attr('offset', '0%').attr('stop-color', c[0]).attr('stop-opacity', 0.4);
-      grad.append('stop').attr('offset', '100%').attr('stop-color', c[1]).attr('stop-opacity', 0);
+      grad.append('stop').attr('offset', '10%').attr('stop-color', c[0]).attr('stop-opacity', 0.6);
+      grad.append('stop').attr('offset', '90%').attr('stop-color', c[1]).attr('stop-opacity', 0);
 
       return group.append('path')
         .attr('fill', `url(#${gradId})`)
-        .attr('filter', `url(#${filterId})`)
-        .attr('opacity', 0.5);
+        .attr('filter', 'url(#core-glow)')
+        .attr('opacity', 0.7);
     });
 
     let animationId: number;
-    // Use named 'lineRadial' and 'curveBasisClosed'
     const line = lineRadial<[number, number]>().curve(curveBasisClosed);
-    const numPoints = 18;
+    const numPoints = 24;
 
     const render = () => {
       const time = Date.now() / 1000;
@@ -79,33 +94,46 @@ const Visualizer: React.FC<VisualizerProps> = ({
       if (analyzer && isActive) {
         freqData = new Uint8Array(analyzer.frequencyBinCount);
         analyzer.getByteFrequencyData(freqData);
-        // Use named 'mean' instead of 'd3.mean'
         intensity = mean(freqData) || 0;
       }
 
-      const volFactor = volume / 100;
-      const baseRadius = 120 + (intensity * 0.8);
+      const baseRadius = 110 + (intensity * 0.7);
       
+      // Update Satellites
+      satellites.forEach((sat, i) => {
+          const angle = time * (0.5 + i * 0.2) + (i * Math.PI * 2 / 3);
+          const r = 185 + Math.sin(time + i) * 10;
+          sat.attr('cx', Math.cos(angle) * r)
+             .attr('cy', Math.sin(angle) * r)
+             .attr('opacity', isActive ? 0.8 : 0.1);
+      });
+
+      // Update Rings
+      rings.forEach((ring, i) => {
+          ring.attr('transform', `rotate(${time * (i === 1 ? -10 : 5)})`);
+          ring.attr('opacity', isActive ? 0.4 : 0.05);
+      });
+
       blobs.forEach((blob, i) => {
         const points: [number, number][] = [];
         const speed = (0.2 + i * 0.1);
         
         for (let j = 0; j < numPoints; j++) {
           const angle = (j / numPoints) * Math.PI * 2;
-          const freqVal = (freqData[j % 32] || 0) / 255;
+          const freqVal = (freqData[j % 24] || 0) / 255;
           
-          const audioEffect = isActive ? (freqVal * 80 * (isAITalking ? 1.4 : 1)) : 0;
-          const wobble = Math.sin(time * speed + j * 0.5 + i) * (20 + (volFactor * 30));
+          const audioEffect = isActive ? (freqVal * 120 * (isAITalking ? 1.8 : 0.8)) : 0;
+          const pulse = Math.sin(time * speed + j * 0.5 + i) * (20 + (intensity * 0.1));
           
-          const r = baseRadius + audioEffect + wobble;
+          const r = baseRadius + audioEffect + pulse;
           points.push([angle, r]);
         }
 
         blob.attr('d', line(points));
         const rotation = time * (10 + i * 5);
-        const scale = isActive ? 1.0 + (intensity / 500) : 0.95;
+        const scale = isActive ? 1.0 + (intensity / 500) : 0.85;
         blob.attr('transform', `rotate(${rotation}) scale(${scale})`);
-        blob.attr('opacity', isActive ? 0.6 : 0.2);
+        blob.attr('opacity', isActive ? 0.8 : 0.1);
       });
 
       animationId = requestAnimationFrame(render);
@@ -113,19 +141,19 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
     render();
     return () => cancelAnimationFrame(animationId);
-  }, [isActive, isAITalking, analyzer, volume, brightness, battery, isSharingScreen, cpuUsage, isOnline]);
+  }, [isActive, isAITalking, analyzer]);
 
   return (
-    <div className="relative flex items-center justify-center w-[500px] h-[500px]">
+    <div className="relative flex items-center justify-center w-[600px] h-[600px]">
       <div 
-        className="absolute inset-0 rounded-full transition-all duration-1000 blur-[150px]"
+        className="absolute inset-0 rounded-full transition-all duration-1000 blur-[200px]"
         style={{
-          opacity: 0.2 + (brightness / 200),
-          background: isActive ? '#3b82f6' : '#111',
-          transform: `scale(${isActive ? 1.1 : 0.9})`
+          opacity: isActive ? 0.25 : 0.05,
+          background: isAITalking ? '#3b82f6' : '#1e1b4b',
+          transform: `scale(${isActive ? 1.3 : 0.7})`
         }}
       ></div>
-      <svg ref={svgRef} width="500" height="500" viewBox="0 0 500 500" className="z-10"></svg>
+      <svg ref={svgRef} width="600" height="600" viewBox="0 0 600 600" className="z-10"></svg>
     </div>
   );
 };
