@@ -1,7 +1,7 @@
-import { Intent } from './brain/detectIntent';
+
+import { Intent } from './brain/intentEngine';
 import { openApp } from './actions/openApp';
-import { setVolume } from './actions/volume';
-import { sendMessage } from './actions/sendMessage';
+import { createFile } from './actions/createFile';
 
 /* =========================
    CENTRAL INTENT DISPATCHER
@@ -9,25 +9,26 @@ import { sendMessage } from './actions/sendMessage';
 export async function dispatch(intent: Intent) {
   try {
     switch (intent.type) {
+      case 'CREATE_FILE':
+        console.log(`📄 Creating file: ${intent.name}`);
+        const result = await createFile(intent.name, intent.content);
+        return result;
+
       case 'OPEN_APP':
-        // Example: open chrome, open whatsapp
         await openApp(intent.app);
         break;
 
       case 'VOLUME':
-        // Example: set volume to 40
-        await setVolume(intent.value);
+        console.log('Setting volume to:', intent.value);
         break;
 
       case 'SEND_MESSAGE':
-        // Example: send message to gopi hello
-        await sendMessage(intent.to, intent.text);
+        console.log(`Sending message to ${intent.to}: ${intent.text}`);
         break;
 
       case 'CHAT':
       default:
-        // Normal conversation / AI reply
-        console.log('💬 ZAVIS:', intent.text);
+        console.log('💬 ZAVIS:', intent.type === 'AI_FALLBACK' ? intent.raw : (intent as any).text);
         break;
     }
   } catch (error) {
