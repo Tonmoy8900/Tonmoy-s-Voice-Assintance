@@ -4,91 +4,133 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZAVIS Global | Bumba Edition</title>
+    <title>ZAVIS | Neural Assistant</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
-            background-color: #020202;
-            color: #f8fafc;
+            background-color: #0b0d17;
+            color: #e2e8f0;
             margin: 0;
             font-family: 'Space Grotesk', sans-serif;
             overflow: hidden;
-            background-image: 
-                radial-gradient(circle at 50% 50%, rgba(30, 58, 138, 0.05) 0%, transparent 50%),
-                linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-            background-size: 100% 100%, 50px 50px, 50px 50px;
         }
-        .glass {
-            background: rgba(10, 10, 15, 0.6);
-            backdrop-filter: blur(25px) saturate(180%);
-            -webkit-backdrop-filter: blur(25px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+        .zavis-panel {
+            background: #161b2e;
+            border-radius: 1.25rem;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
         }
-        .glow-border {
+        .sidebar-icon {
+            color: #64748b;
+            font-size: 1.25rem;
+            transition: all 0.2s;
+            cursor: pointer;
+            padding: 0.75rem;
+            border-radius: 0.75rem;
+        }
+        .sidebar-icon:hover, .sidebar-icon.active {
+            color: #818cf8;
+            background: rgba(129, 140, 248, 0.05);
+        }
+        .neural-circle {
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            border: 2px solid #2d3748;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             position: relative;
         }
-        .glow-border::after {
+        .neural-circle::after {
             content: '';
             position: absolute;
-            inset: -1px;
-            background: linear-gradient(45deg, transparent, rgba(59, 130, 246, 0.3), transparent);
-            border-radius: inherit;
-            z-index: -1;
-            mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-            mask-composite: exclude;
-            pointer-events: none;
+            inset: 10px;
+            border-radius: 50%;
+            border: 1px solid #4f46e5;
+            opacity: 0.2;
+            animation: pulse 2s infinite ease-in-out;
         }
-        .text-gradient {
-            background: linear-gradient(135deg, #fff 30%, #3b82f6 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.1; }
+            50% { transform: scale(1.05); opacity: 0.3; }
+            100% { transform: scale(0.95); opacity: 0.1; }
         }
-        ::-webkit-scrollbar {
-            width: 3px;
+        .chat-bubble {
+            border-radius: 0.75rem;
+            padding: 0.85rem 1rem;
+            margin-bottom: 0.75rem;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            transition: all 0.3s ease;
         }
-        ::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.2);
+        .chat-user {
+            background: #312e81;
+            color: #e0e7ff;
+            border-bottom-right-radius: 0.25rem;
         }
-        ::-webkit-scrollbar-thumb {
-            background: linear-gradient(to bottom, transparent, rgba(59, 130, 246, 0.5), transparent);
+        .chat-ai {
+            background: #1e293b;
+            color: #cbd5e1;
+            border-bottom-left-radius: 0.25rem;
+        }
+        .custom-scroll::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #4f46e5;
             border-radius: 10px;
         }
-        @keyframes scanline {
-            0% { transform: translateY(-100%); }
-            100% { transform: translateY(100%); }
+        .timeline-item {
+            position: relative;
+            padding-left: 1.5rem;
         }
-        .scanline {
-            width: 100%;
-            height: 2px;
-            background: rgba(59, 130, 246, 0.1);
+        .timeline-item::before {
+            content: '';
             position: absolute;
-            top: 0;
             left: 0;
-            animation: scanline 8s linear infinite;
-            pointer-events: none;
+            top: 50%;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #64748b;
+            transform: translateY(-50%);
+        }
+        .timeline-item.active::before {
+            background: #818cf8;
+            box-shadow: 0 0 8px #818cf8;
+        }
+        .input-bar {
+            background: #0f172a;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 1rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         }
     </style>
 <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@19.0.0",
-    "react/": "https://esm.sh/react@19.0.0/",
-    "react-dom": "https://esm.sh/react-dom@19.0.0",
-    "react-dom/": "https://esm.sh/react-dom@19.0.0/",
-    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
-    "d3": "https://esm.sh/d3@7.9.0",
-    "recharts": "https://esm.sh/recharts@2.12.7?external=react,react-dom",
-    "@google/genai": "https://esm.sh/@google/genai@1.38.0"
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "d3": "https://esm.sh/d3@^7.9.0",
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "child_process": "https://esm.sh/child_process@^1.0.2",
+    "playwright": "https://esm.sh/playwright@^1.58.0",
+    "path": "https://esm.sh/path@^0.12.7",
+    "fs": "https://esm.sh/fs@^0.0.1-security"
   }
 }
 </script>
 </head>
 <body>
-    <div class="scanline"></div>
     <div id="root"></div>
 </body>
 </html>

@@ -3,21 +3,34 @@ import { openApp } from './actions/openApp';
 import { setVolume } from './actions/volume';
 import { sendMessage } from './actions/sendMessage';
 
-export function dispatch(intent: Intent) {
-  switch (intent.type) {
-    case 'OPEN_APP':
-      openApp(intent.app);
-      break;
+/* =========================
+   CENTRAL INTENT DISPATCHER
+========================= */
+export async function dispatch(intent: Intent) {
+  try {
+    switch (intent.type) {
+      case 'OPEN_APP':
+        // Example: open chrome, open whatsapp
+        await openApp(intent.app);
+        break;
 
-    case 'VOLUME':
-      setVolume(intent.value);
-      break;
+      case 'VOLUME':
+        // Example: set volume to 40
+        await setVolume(intent.value);
+        break;
 
-    case 'SEND_MESSAGE':
-      sendMessage(intent.to, intent.text);
-      break;
+      case 'SEND_MESSAGE':
+        // Example: send message to gopi hello
+        await sendMessage(intent.to, intent.text);
+        break;
 
-    default:
-      console.log('💬 Chat:', intent.text);
+      case 'CHAT':
+      default:
+        // Normal conversation / AI reply
+        console.log('💬 ZAVIS:', intent.text);
+        break;
+    }
+  } catch (error) {
+    console.error('❌ Dispatcher error:', error);
   }
 }
