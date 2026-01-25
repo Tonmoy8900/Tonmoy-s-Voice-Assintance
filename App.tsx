@@ -7,9 +7,6 @@ import { select, mean, lineRadial, curveBasisClosed } from 'd3';
 type ViewMode = 'dashboard' | 'tasks' | 'advanced-chat';
 type Expression = 'neutral' | 'happy' | 'thinking' | 'listening' | 'alert' | 'pro-processing';
 
-/* =========================
-   D3 VISUALIZER COMPONENT
-========================= */
 const NeuralVisualizer: React.FC<{ isActive: boolean; isAITalking: boolean; level: number }> = ({ isActive, isAITalking, level }) => {
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -65,9 +62,6 @@ const NeuralVisualizer: React.FC<{ isActive: boolean; isAITalking: boolean; leve
   return <svg ref={svgRef} width="500" height="500" className="opacity-80" />;
 };
 
-/* =========================
-   WATCH COMPONENTS
-========================= */
 const DigitalWatch: React.FC = () => {
   const [time, setTime] = useState(new Date());
   useEffect(() => {
@@ -86,9 +80,6 @@ const DigitalWatch: React.FC = () => {
   );
 };
 
-/* =========================
-   MAIN APPLICATION
-========================= */
 const App: React.FC = () => {
   const [view, setView] = useState<ViewMode>('dashboard');
   const [history, setHistory] = useState<Transcription[]>([]);
@@ -129,7 +120,12 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          systemInstruction: "You are Myra, Tonmoy's (Boss) AI Windows Assistant. Be snappy, human-like, and high-tech. Use Asia/Kolkata time.",
+          systemInstruction: `SYSTEM PROTOCOL:
+          You are Myra, Tonmoy's (Boss) high-speed interface.
+          URGENCY: Respond with near-zero latency.
+          PERSONALITY: Human-like, brief, technical, and snappy.
+          Avoid conversational filler. Respond like a fast command-line tool.
+          Current timezone is IST (Asia/Kolkata).`,
           inputAudioTranscription: {},
         },
         callbacks: {
