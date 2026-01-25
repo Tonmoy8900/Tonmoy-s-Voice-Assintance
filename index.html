@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tonmoy's AI Assistance</title>
+    <title>Myra AI | Windows Assistance</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -23,7 +23,6 @@
             height: 100vh;
         }
         
-        /* Immersive HUD Background */
         .bg-gradient-mesh {
             position: fixed;
             inset: 0;
@@ -41,7 +40,7 @@
             background-size: 100% 3px;
             pointer-events: none;
             z-index: 100;
-            opacity: 0.2;
+            opacity: 0.1;
         }
 
         .zavis-glass {
@@ -52,24 +51,23 @@
         }
 
         .unique-header {
-            font-size: 3.5rem; /* Increased size as requested */
+            font-size: 2.5rem;
             font-weight: 800;
-            letter-spacing: -0.06em;
+            letter-spacing: -0.04em;
             background: linear-gradient(to bottom, #fff 30%, #f59e0b 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             text-transform: uppercase;
-            filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 30px rgba(245, 158, 11, 0.2));
+            filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.8));
             line-height: 1;
         }
 
-        /* Animations */
         @keyframes float {
             0%, 100% { transform: translateY(0px) rotate(0deg); }
-            50% { transform: translateY(-25px) rotate(2deg); }
+            50% { transform: translateY(-15px) rotate(1deg); }
         }
         .animate-float {
-            animation: float 12s ease-in-out infinite;
+            animation: float 8s ease-in-out infinite;
         }
 
         @keyframes rotate-slow {
@@ -77,40 +75,7 @@
             to { transform: rotate(360deg); }
         }
         .animate-rotate {
-            animation: rotate-slow 40s linear infinite;
-        }
-
-        .doll-presence {
-            animation: idleBreath 10s ease-in-out infinite;
-            transform-origin: bottom center;
-        }
-        @keyframes idleBreath {
-            0%, 100% { transform: translateY(0) scale(1) rotate(0deg); }
-            50% { transform: translateY(-15px) scale(1.02) rotate(0.5deg); }
-        }
-
-        .speech-bubble-anim {
-            animation: bubblePop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-        }
-        @keyframes bubblePop {
-            from { opacity: 0; transform: scale(0.7) translateY(40px); filter: blur(10px); }
-            to { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
-        }
-
-        .mouth-move {
-            animation: mouthSync 0.08s ease-in-out infinite alternate;
-        }
-        @keyframes mouthSync {
-            from { transform: scaleY(0.5); }
-            to { transform: scaleY(1.5); }
-        }
-
-        .eye-blink {
-            animation: naturalBlink 6s infinite;
-        }
-        @keyframes naturalBlink {
-            0%, 90%, 92%, 96%, 100% { transform: scaleY(1); }
-            91%, 94% { transform: scaleY(0.05); }
+            animation: rotate-slow 60s linear infinite;
         }
 
         .custom-scroll::-webkit-scrollbar { width: 4px; }
@@ -120,13 +85,14 @@
 {
   "imports": {
     "react": "https://esm.sh/react@^19.2.3",
+    "react-dom": "https://esm.sh/react-dom@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/",
     "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
     "d3": "https://esm.sh/d3@^7.9.0",
+    "path": "https://esm.sh/path@^0.12.7",
     "child_process": "https://esm.sh/child_process@^1.0.2",
     "playwright": "https://esm.sh/playwright@^1.58.0",
-    "path": "https://esm.sh/path@^0.12.7",
     "fs": "https://esm.sh/fs@^0.0.1-security"
   }
 }
@@ -136,5 +102,6 @@
     <div class="bg-gradient-mesh"></div>
     <div class="scanline-overlay"></div>
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
 </body>
 </html>
