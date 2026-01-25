@@ -62,22 +62,6 @@
             line-height: 1;
         }
 
-        @keyframes float {
-            0%, 100% { transform: translateY(0px) rotate(0deg); }
-            50% { transform: translateY(-15px) rotate(1deg); }
-        }
-        .animate-float {
-            animation: float 8s ease-in-out infinite;
-        }
-
-        @keyframes rotate-slow {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-        .animate-rotate {
-            animation: rotate-slow 60s linear infinite;
-        }
-
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: rgba(245, 158, 11, 0.2); border-radius: 10px; }
     </style>
@@ -89,12 +73,12 @@
     "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
     "@google/genai": "https://esm.sh/@google/genai@0.2.1",
     "d3": "https://esm.sh/d3@7.9.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
     "child_process": "https://esm.sh/child_process@^1.0.2",
     "playwright": "https://esm.sh/playwright@^1.58.0",
     "path": "https://esm.sh/path@^0.12.7",
-    "fs": "https://esm.sh/fs@^0.0.1-security",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/"
+    "fs": "https://esm.sh/fs@^0.0.1-security"
   }
 }
 </script>
