@@ -1,10 +1,9 @@
 {
-  "name": "Tonmoy's AI Assistance",
-  "description": "Zero-latency AI Virtual Intelligent System. Advanced Windows OS integration with robotic file ops, messaging, and email management.",
+  "name": "Myra AI Assistant",
+  "description": "Voice-enabled intelligent assistant for Windows users.",
   "requestFramePermissions": [
     "microphone",
     "camera",
-    "display-capture",
     "geolocation"
   ]
 }

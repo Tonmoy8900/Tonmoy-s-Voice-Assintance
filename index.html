@@ -9,61 +9,48 @@
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --accent-primary: #f59e0b;
-            --accent-glow: rgba(245, 158, 11, 0.4);
-            --bg-deep: #020202;
-            --panel-bg: rgba(10, 8, 7, 0.7);
+            --accent: #f59e0b;
+            --bg: #020202;
         }
         body {
-            background: var(--bg-deep);
-            color: #f5f5f4;
+            background: var(--bg);
+            color: #fafaf9;
             margin: 0;
             font-family: 'Space Grotesk', sans-serif;
             overflow: hidden;
             height: 100vh;
         }
-        
-        .bg-gradient-mesh {
+        .bg-mesh {
             position: fixed;
             inset: 0;
             background: 
-                radial-gradient(circle at 50% -20%, rgba(245, 158, 11, 0.08) 0%, transparent 60%),
-                radial-gradient(circle at 10% 90%, rgba(30, 64, 175, 0.04) 0%, transparent 50%),
-                radial-gradient(circle at 90% 90%, rgba(245, 158, 11, 0.03) 0%, transparent 50%);
+                radial-gradient(circle at 50% -20%, rgba(245, 158, 11, 0.12) 0%, transparent 70%),
+                radial-gradient(circle at 0% 100%, rgba(30, 64, 175, 0.05) 0%, transparent 50%);
             z-index: -1;
         }
-
-        .scanline-overlay {
-            position: fixed;
-            inset: 0;
-            background: linear-gradient(rgba(18, 16, 15, 0) 50%, rgba(0, 0, 0, 0.08) 50%);
-            background-size: 100% 3px;
-            pointer-events: none;
-            z-index: 100;
-            opacity: 0.1;
-        }
-
-        .zavis-glass {
-            background: var(--panel-bg);
+        .glass {
+            background: rgba(10, 8, 6, 0.7);
             backdrop-filter: blur(40px) saturate(180%);
             border: 1px solid rgba(255, 255, 255, 0.03);
-            box-shadow: 0 40px 100px -20px rgba(0, 0, 0, 0.9);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
         }
-
         .unique-header {
-            font-size: 2.5rem;
-            font-weight: 800;
-            letter-spacing: -0.04em;
-            background: linear-gradient(to bottom, #fff 30%, #f59e0b 100%);
+            background: linear-gradient(to bottom, #fff 20%, #f59e0b 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            text-transform: uppercase;
-            filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.8));
-            line-height: 1;
+            font-weight: 800;
+            letter-spacing: -0.02em;
         }
-
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: rgba(245, 158, 11, 0.2); border-radius: 10px; }
+        
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.5; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(1.05); }
+        }
+        .glow-effect {
+            animation: pulse-glow 4s ease-in-out infinite;
+        }
     </style>
 <script type="importmap">
 {
@@ -75,17 +62,16 @@
     "d3": "https://esm.sh/d3@7.9.0",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/",
-    "child_process": "https://esm.sh/child_process@^1.0.2",
     "playwright": "https://esm.sh/playwright@^1.58.0",
     "path": "https://esm.sh/path@^0.12.7",
+    "child_process": "https://esm.sh/child_process@^1.0.2",
     "fs": "https://esm.sh/fs@^0.0.1-security"
   }
 }
 </script>
 </head>
 <body>
-    <div class="bg-gradient-mesh"></div>
-    <div class="scanline-overlay"></div>
+    <div class="bg-mesh"></div>
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
 </body>

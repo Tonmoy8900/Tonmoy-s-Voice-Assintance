@@ -1,8 +1,9 @@
 {
   "name": "tonmoy-voice-assistant",
   "private": true,
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "echo 'no build needed'"
+    "build": "echo 'No build step required for static ESM'"
   }
 }
