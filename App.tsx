@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { decode, decodeAudioData, createBlob } from './audioUtils';
+import { decode, decodeAudioData, createBlob, blobToBase64 } from './audioUtils'; // Import blobToBase64
 import MyraAvatar from './components/MyraAvatar';
 import Visualizer from './services/Visualizer';
 import { SystemStatus } from './types';
@@ -11,7 +11,7 @@ interface LogEntry {
   id: string;
   time: string;
   message: string;
-  type: 'info' | 'error' | 'tool' | 'system';
+  type: 'info' | 'error' | 'tool' | 'system' | 'debug' | 'grounding';
 }
 
 interface ToolLog {
@@ -84,9 +84,11 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'online'>('idle');
   const [isTalking, setIsTalking] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [aiResponseText, setAiResponseText] = useState(""); // New state for AI's text response
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [toolLogs, setToolLogs] = useState<ToolLog[]>([]);
   const [audioLevel, setAudioLevel] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({
     volume: 80,
@@ -103,6 +105,11 @@ const App: React.FC = () => {
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const playwrightPageRef = useRef<any>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null); // To store and stop the media stream
+  
+  const videoRef = useRef<HTMLVideoElement>(null); // For camera preview
+  const canvasRef = useRef<HTMLCanvasElement>(null); // For capturing video frames
+  const frameIntervalRef = useRef<number | null>(null); // For sending video frames
 
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
@@ -199,49 +206,140 @@ const App: React.FC = () => {
         default:
             throw new Error(`Tool ${fc.name} not found.`);
     }
-  }, []);
+  }, [addLog]);
 
   const stopAssistant = useCallback(() => {
     setStatus('idle');
     setIsTalking(false);
     setTranscript("");
+    setAiResponseText(""); // Clear AI response text on stop
+    setErrorMessage(null); // Clear any error messages
     addLog("LINK_TERMINATED", "system");
     setSystemStatus(prev => ({ ...prev, isListening: false }));
+    
+    // Stop all audio playback sources
     sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
     sourcesRef.current.clear();
-    // No need to close the session explicitly here as onclose callback handles it.
-    // If the session was stopped by user, session.close() would be called.
+    nextStartTimeRef.current = 0;
+
+    // Stop microphone and camera stream
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    // Clear video frame interval
+    if (frameIntervalRef.current) {
+      clearInterval(frameIntervalRef.current);
+      frameIntervalRef.current = null;
+    }
+    // Close audio context
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(console.error);
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
+    sessionPromiseRef.current = null;
   }, [addLog]);
 
   const startAssistant = async () => {
     if (status !== 'idle') return;
     setStatus('connecting');
+    setErrorMessage(null); // Clear previous errors
     addLog("INITIALIZING_NEURAL_UPLINK...", "system");
     setSystemStatus(prev => ({ ...prev, isListening: true }));
 
     try {
       const apiKey = process.env.API_KEY; // In Electron, process.env is directly available
-      if (!apiKey) throw new Error("API Key not found in environment variables. Please set API_KEY.");
+      if (!apiKey) {
+        throw new Error("API Key not found in environment variables. Please set API_KEY.");
+      }
+
+      // 1. Get Microphone & Camera Access
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true, 
+        video: { width: 320, height: 240 } // Request video stream
+      });
+      mediaStreamRef.current = stream; // Store stream to stop later
+      addLog("Microphone and Camera access granted.", "info");
+
+      // Display video feed
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(e => addLog(`Error playing video stream: ${e.message}`, "error"));
+      }
 
       const ai = new GoogleGenAI({ apiKey });
       audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
+      
+      // 2. Connect to Live API
       const session = await ai.live.connect({ // Await the connection directly
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          systemInstruction: "You are Myra, Tonmoy Das's witty cartoon girl assistant for his Windows laptop. Be snappy and helpful. You can open applications, create and open files/folders, and send WhatsApp messages. Use the available tools to fulfill user requests.",
+          systemInstruction: "You are Myra, Tonmoy Das's witty cartoon girl assistant for his Windows laptop. Be snappy, helpful, and personable. You have vision capabilities via the user's camera, so you can perceive what's in front of you. Use this visual context in your responses when relevant. You can open applications, create and open files/folders, and send WhatsApp messages. Use the available tools to fulfill user requests. Also, answer general knowledge questions and engage in conversational chat.",
           inputAudioTranscription: {},
+          outputAudioTranscription: {}, // Enable transcription for model output audio
           tools: [{ functionDeclarations: systemTools }, { googleSearch: {} }]
         },
         callbacks: {
-          onopen: () => { setStatus('online'); addLog("SYNC_SUCCESSFUL", "system"); },
+          onopen: () => { 
+            setStatus('online'); 
+            addLog("SYNC_SUCCESSFUL", "system"); 
+
+            // Start sending video frames
+            const videoEl = videoRef.current;
+            const canvasEl = canvasRef.current;
+            const ctx = canvasEl?.getContext('2d');
+            if (videoEl && canvasEl && ctx) {
+              // Set canvas dimensions to match video stream
+              canvasEl.width = videoEl.videoWidth;
+              canvasEl.height = videoEl.videoHeight;
+              
+              const JPEG_QUALITY = 0.7; // Adjust as needed
+              const FRAME_RATE_MS = 2000; // Send frame every 2 seconds
+
+              frameIntervalRef.current = window.setInterval(() => {
+                if (videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
+                  ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+                  canvasEl.toBlob(
+                    async (blob) => {
+                      if (blob) {
+                        const base64Data = await blobToBase64(blob);
+                        // NOTE: This is important to ensure data is streamed only after the session promise resolves.
+                        sessionPromiseRef.current?.then((s) => {
+                          s.sendRealtimeInput({
+                            media: { data: base64Data, mimeType: 'image/jpeg' }
+                          });
+                        }).catch((sendErr: any) => { /* console.error("Error sending image input:", sendErr); */ });
+                      }
+                    },
+                    'image/jpeg',
+                    JPEG_QUALITY
+                  );
+                }
+              }, FRAME_RATE_MS);
+            }
+          },
           onmessage: async (msg: LiveServerMessage) => {
-            if (msg.serverContent?.inputTranscription) setTranscript(msg.serverContent.inputTranscription.text);
-            if (msg.serverContent?.modelTurn) setIsTalking(true);
-            if (msg.serverContent?.turnComplete) { setIsTalking(false); setTranscript(""); }
+            // Update user transcript
+            if (msg.serverContent?.inputTranscription) {
+              setTranscript(msg.serverContent.inputTranscription.text);
+            }
+            // Update AI response text
+            if (msg.serverContent?.outputTranscription) {
+              setAiResponseText(msg.serverContent.outputTranscription.text);
+            }
+            // Indicate AI is talking
+            if (msg.serverContent?.modelTurn) {
+              setIsTalking(true);
+            }
+            // Turn complete: clear transcripts
+            if (msg.serverContent?.turnComplete) {
+              setIsTalking(false);
+              setTranscript("");
+              setAiResponseText(""); // Clear AI response text
+            }
             
             if (msg.serverContent?.interrupted) {
               sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
@@ -249,6 +347,7 @@ const App: React.FC = () => {
               nextStartTimeRef.current = 0;
             }
 
+            // Handle AI audio output
             const audioData = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (audioData && audioCtxRef.current) {
               const ctx = audioCtxRef.current;
@@ -263,6 +362,7 @@ const App: React.FC = () => {
               nextStartTimeRef.current += buffer.duration;
             }
 
+            // Handle Tool Calls
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
                 addLog(`TOOL_EXEC: ${fc.name}(${JSON.stringify(fc.args)})`, "tool");
@@ -287,6 +387,16 @@ const App: React.FC = () => {
                 });
               }
             }
+
+            // Handle Grounding (Google Search results)
+            if (msg.serverContent?.groundingMetadata?.groundingChunks) {
+              for (const chunk of msg.serverContent.groundingMetadata.groundingChunks) {
+                if (chunk.web?.uri && chunk.web?.title) {
+                  addLog(`GROUNDING_SOURCE: ${chunk.web.title} - ${chunk.web.uri}`, "grounding");
+                }
+                // Add similar handling for maps if needed
+              }
+            }
           },
           onclose: () => stopAssistant(),
           onerror: (e) => { 
@@ -297,6 +407,7 @@ const App: React.FC = () => {
       });
       sessionPromiseRef.current = Promise.resolve(session); // Store the resolved session in ref
 
+      // 3. Set up Audio Processing for Input
       const inCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       analyserRef.current = inCtx.createAnalyser();
       analyserRef.current.fftSize = 256;
@@ -308,23 +419,49 @@ const App: React.FC = () => {
       analyserRef.current.connect(processor);
       processor.connect(inCtx.destination);
 
+      let debugAudioLogCounter = 0; // For controlled debug logging
       processor.onaudioprocess = (e) => {
         const input = e.inputBuffer.getChannelData(0);
         let sum = 0; for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
         setAudioLevel(Math.sqrt(sum / input.length));
+        
         // Use the resolved session from the ref
         sessionPromiseRef.current?.then(s => s.sendRealtimeInput({ media: createBlob(input) })).catch((sendErr: any) => { /* console.error("Error sending input:", sendErr); */ });
+      
+        // Add a debug log to confirm audio chunks are being sent
+        if (debugAudioLogCounter % 50 === 0) { // Log every ~10 seconds (50 * 2048/16000s per chunk)
+          addLog("Sending audio chunk...", "debug");
+        }
+        debugAudioLogCounter++;
       };
       
     } catch (err: any) {
-      addLog(`BOOT_FAILURE: ${err.message}`, "error");
+      const errorMsg = err.message || "An unknown error occurred during assistant boot.";
+      addLog(`BOOT_FAILURE: ${errorMsg}`, "error");
+      setErrorMessage(
+        errorMsg.includes("API Key") 
+        ? "API Key Missing: Please ensure process.env.API_KEY is set."
+        : errorMsg.includes("Permission denied") || errorMsg.includes("microphone") || errorMsg.includes("camera")
+          ? "Microphone/Camera Access Denied: Please allow microphone and camera access in your system settings."
+          : `Connection Error: ${errorMsg}`
+      );
       setStatus('idle'); // Crucial: Reset status to idle so the button reappears
       setSystemStatus(prev => ({ ...prev, isListening: false }));
-      // Ensure microphone stream is stopped if an error occurs early
+      
+      // Clean up resources if an error occurs early
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+      }
+      if (frameIntervalRef.current) {
+        clearInterval(frameIntervalRef.current);
+        frameIntervalRef.current = null;
+      }
       if (audioCtxRef.current) {
         audioCtxRef.current.close().catch(console.error);
         audioCtxRef.current = null;
       }
+      analyserRef.current = null;
     }
   };
 
@@ -347,6 +484,7 @@ const App: React.FC = () => {
             onClick={status === 'online' ? stopAssistant : startAssistant} 
             className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl transition-all ${status === 'online' ? 'bg-indigo-500 text-white' : 'bg-white/5 text-stone-600'}`}
             aria-label={status === 'online' ? 'Stop Assistant' : 'Start Assistant'}
+            disabled={status === 'connecting'} // Disable button during connecting state
           >
             <i className="fa-solid fa-microphone"></i>
           </button>
@@ -371,14 +509,32 @@ const App: React.FC = () => {
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
                 <MyraAvatar isTalking={isTalking} level={audioLevel} />
             </div>
+
+            {/* Hidden canvas for video frame processing */}
+            <canvas ref={canvasRef} className="hidden"></canvas>
             
-            {transcript && (
+            {/* Live Camera Feed */}
+            {status === 'online' && (
+              <video 
+                ref={videoRef} 
+                width="160" 
+                height="120" 
+                autoPlay 
+                playsInline 
+                muted 
+                className="absolute bottom-6 left-6 rounded-2xl shadow-xl border border-white/10 bg-black/50"
+                style={{ transform: 'scaleX(-1)' }} // Mirror video
+              ></video>
+            )}
+            
+            {(transcript || aiResponseText) && (
               <div className="absolute bottom-12 bg-black/70 backdrop-blur-3xl px-10 py-5 rounded-2xl border border-white/10 text-xl italic text-indigo-100 max-w-[70%] text-center">
-                "{transcript}"
+                {transcript && <p className="mb-2 text-white/80">"{transcript}"</p>}
+                {aiResponseText && <p className="text-indigo-200">"{aiResponseText}"</p>}
               </div>
             )}
             
-            {status === 'idle' && (
+            {status === 'idle' && !errorMessage && (
               <button onClick={startAssistant} className="absolute inset-0 bg-black/20 flex items-center justify-center group">
                 <div className="glass px-12 py-6 rounded-3xl border-indigo-500/30 text-indigo-400 font-bold uppercase tracking-widest group-hover:scale-110 transition-transform">Sync Assistant</div>
               </button>
@@ -391,13 +547,28 @@ const App: React.FC = () => {
                     </div>
                 </div>
             )}
+            {errorMessage && (
+                <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center text-red-400 text-center p-8 z-40">
+                    <i className="fa-solid fa-exclamation-triangle text-5xl mb-4"></i>
+                    <p className="text-xl font-bold mb-4">ASSISTANT OFFLINE</p>
+                    <p className="text-lg max-w-md">{errorMessage}</p>
+                    <button onClick={startAssistant} className="mt-8 glass px-8 py-4 rounded-xl border border-red-500/30 text-white font-bold uppercase tracking-widest hover:scale-105 transition-transform">
+                        Try Again
+                    </button>
+                </div>
+            )}
           </section>
 
           <aside className="w-[380px] flex flex-col gap-8">
             <div className="h-[300px] glass rounded-[3rem] p-8 overflow-hidden">
                <span className="text-[10px] font-black tracking-widest text-indigo-500 uppercase block mb-6">Neural Stream</span>
                <div className="space-y-4 font-mono text-[10px] overflow-y-auto custom-scroll h-full pb-8">
-                  {logs.map(l => <div key={l.id} className="flex gap-2 opacity-80"><span className="text-stone-600">[{l.time}]</span><span>{l.message}</span></div>)}
+                  {logs.map(l => (
+                    <div key={l.id} className="flex gap-2 opacity-80">
+                      <span className="text-stone-600">[{l.time}]</span>
+                      <span className={l.type === 'error' ? 'text-red-400' : l.type === 'tool' ? 'text-amber-300' : l.type === 'debug' ? 'text-emerald-400' : l.type === 'grounding' ? 'text-blue-300' : ''}>{l.message}</span>
+                    </div>
+                  ))}
                </div>
             </div>
             <div className="flex-1 glass rounded-[3rem] p-8">
