@@ -1,199 +1,417 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
-import { Transcription, Task } from './types';
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
 import { decode, decodeAudioData, createBlob } from './audioUtils';
-import { select, lineRadial, curveBasisClosed } from 'd3';
+import MyraAvatar from './components/MyraAvatar';
+import Visualizer from './services/Visualizer';
+import { SystemStatus } from './types';
 
-const NeuralCore: React.FC<{ isActive: boolean; isTalking: boolean; level: number }> = ({ isActive, isTalking, level }) => {
-  const svgRef = useRef<SVGSVGElement>(null);
+// --- Types ---
+interface LogEntry {
+  id: string;
+  time: string;
+  message: string;
+  type: 'info' | 'error' | 'tool' | 'system';
+}
 
-  useEffect(() => {
-    if (!svgRef.current) return;
-    const width = 450;
-    const height = 450;
-    const svg = select(svgRef.current);
-    svg.selectAll('*').remove();
+interface ToolLog {
+  id: string;
+  name: string;
+  args: any;
+  status: 'pending' | 'success' | 'error';
+  timestamp: number;
+}
 
-    const defs = svg.append('defs');
-    const filter = defs.append('filter').attr('id', 'neural-glow');
-    filter.append('feGaussianBlur').attr('stdDeviation', 15).attr('result', 'blur');
-    filter.append('feMerge').selectAll('feMergeNode').data(['blur', 'SourceGraphic']).enter().append('feMergeNode').attr('in', d => d);
-
-    const group = svg.append('g').attr('transform', `translate(${width / 2}, ${height / 2})`);
-    const colors = isTalking ? ['#fbbf24', '#d97706'] : ['#3b82f6', '#1e40af'];
-
-    const blobs = [0, 1, 2].map((_, i) => {
-      const gradId = `neural-grad-${i}`;
-      const grad = defs.append('radialGradient').attr('id', gradId);
-      grad.append('stop').attr('offset', '10%').attr('stop-color', colors[0]).attr('stop-opacity', 0.5);
-      grad.append('stop').attr('offset', '100%').attr('stop-color', colors[1]).attr('stop-opacity', 0);
-      return group.append('path').attr('fill', `url(#${gradId})`).attr('filter', 'url(#neural-glow)').attr('opacity', 0.6);
-    });
-
-    const line = lineRadial<number>().curve(curveBasisClosed);
-    let rafId: number;
-
-    const animate = () => {
-      const t = Date.now() / 1000;
-      blobs.forEach((blob, i) => {
-        const points: number[] = [];
-        const base = 90 + (level * 140);
-        for (let j = 0; j <= 24; j++) {
-          const noise = Math.sin(t * (2 + i * 0.5) + j * 0.4) * (15 + level * 60);
-          points.push(base + noise);
-        }
-        blob.attr('d', line(points as any));
-        blob.attr('transform', `rotate(${t * (8 + i * 3) * (i % 2 === 0 ? 1 : -1)})`);
-      });
-      rafId = requestAnimationFrame(animate);
-    };
-    animate();
-    return () => cancelAnimationFrame(rafId);
-  }, [isTalking, level]);
-
-  return <svg ref={svgRef} width="450" height="450" className="drop-shadow-2xl" />;
-};
+const systemTools: FunctionDeclaration[] = [
+  {
+    name: 'open_application',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Opens a Windows application.',
+      properties: { app_name: { type: Type.STRING, description: 'Application name (e.g., notepad, chrome, explorer, cmd)' } },
+      required: ['app_name']
+    }
+  },
+  {
+    name: 'create_file',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Creates a file with specified name and content.',
+      properties: {
+        file_name: { type: Type.STRING, description: 'The name of the file, e.g., "notes.txt"' },
+        content: { type: Type.STRING, description: 'The content to write into the file.' }
+      },
+      required: ['file_name', 'content']
+    }
+  },
+  {
+    name: 'create_folder',
+    parameters: {
+        type: Type.OBJECT,
+        description: 'Creates a new folder.',
+        properties: {
+            folder_name: { type: Type.STRING, description: 'The name of the folder, e.g., "MyProject"' }
+        },
+        required: ['folder_name']
+    }
+  },
+  {
+      name: 'open_folder',
+      parameters: {
+          type: Type.OBJECT,
+          description: 'Opens a folder in the Windows file explorer.',
+          properties: {
+              folder_path: { type: Type.STRING, description: 'The path to the folder, e.g., "."' }
+          },
+          required: ['folder_path']
+      }
+  },
+  {
+      name: 'send_whatsapp_message',
+      parameters: {
+          type: Type.OBJECT,
+          description: 'Sends a WhatsApp message to a contact.',
+          properties: {
+              contact_name: { type: Type.STRING, description: 'The name of the contact as saved in WhatsApp.' },
+              message: { type: Type.STRING, description: 'The message to send.' }
+          },
+          required: ['contact_name', 'message']
+      }
+  }
+];
 
 const App: React.FC = () => {
-  const [view, setView] = useState<'dash' | 'chat' | 'tasks'>('dash');
-  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'online'>('idle');
   const [isTalking, setIsTalking] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [logs, setLogs] = useState<string[]>([]);
-  const [inputLevel, setInputLevel] = useState(0);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [toolLogs, setToolLogs] = useState<ToolLog[]>([]);
+  const [audioLevel, setAudioLevel] = useState(0);
+
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>({
+    volume: 80,
+    brightness: 90,
+    theme: 'dark',
+    isConnected: true,
+    isListening: false,
+    isSharingScreen: false,
+  });
   
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const nextStartTimeRef = useRef<number>(0);
+  const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const sessionPromiseRef = useRef<Promise<any> | null>(null);
+  const playwrightPageRef = useRef<any>(null);
 
-  const addLog = (msg: string) => {
+  const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
-    setLogs(prev => [`${time} > ${msg}`, ...prev.slice(0, 15)]);
-  };
+    setLogs(prev => [{ id: Math.random().toString(36).substr(2, 9), time, message, type }, ...prev.slice(0, 15)]);
+  }, []);
 
-  const initLink = async () => {
-    if (connected) return;
-    addLog("SYNCHRONIZING_CORE...");
+  const handleToolCall = useCallback(async (fc: { name: string; args: any; id: string }) => {
+    // These 'require' calls will work because Electron's webPreferences in main.js
+    // has nodeIntegration: true and contextIsolation: false
+    const { exec } = (window as any).require('child_process');
+    const fs = (window as any).require('fs');
+    const path = (window as any).require('path');
+    const { chromium } = (window as any).require('playwright');
+    const { ipcRenderer } = (window as any).require('electron');
+
+
+    switch (fc.name) {
+        case 'open_application':
+            const app = fc.args.app_name.toLowerCase();
+            const APP_COMMANDS: Record<string, string> = {
+                chrome: 'start chrome',
+                whatsapp: 'start whatsapp:',
+                notepad: 'notepad',
+                calculator: 'calc',
+                explorer: 'explorer',
+                cmd: 'cmd'
+            };
+            if (APP_COMMANDS[app]) {
+                exec(APP_COMMANDS[app]);
+                return { success: true, message: `Opened ${app}` };
+            } else {
+                throw new Error(`Application ${app} not supported.`);
+            }
+
+        case 'create_file':
+            const { file_name, content } = fc.args;
+            const filePath = path.resolve(file_name);
+            fs.writeFileSync(filePath, content || '', 'utf8');
+            return { success: true, path: filePath };
+
+        case 'create_folder':
+            const { folder_name } = fc.args;
+            const folderPath = path.resolve(folder_name);
+            if (!fs.existsSync(folderPath)) {
+                fs.mkdirSync(folderPath, { recursive: true });
+            }
+            return { success: true, path: folderPath };
+
+        case 'open_folder':
+            const { folder_path: pathToOpen } = fc.args;
+            const resolvedPath = path.resolve(pathToOpen);
+            // Use 'start ""' to open correctly with explorer.exe on Windows
+            exec(`start "" "${resolvedPath}"`); 
+            return { success: true, path: resolvedPath };
+        
+        case 'send_whatsapp_message':
+            const { contact_name, message } = fc.args;
+            
+            addLog("Opening WhatsApp...", "tool");
+            if (!playwrightPageRef.current) {
+                // Get Electron's user data path for persistent context
+                const userDataPath = await ipcRenderer.invoke('get-app-user-data-path');
+                const sessionPath = path.join(userDataPath, 'whatsapp-session');
+
+                // Launch a persistent context for WhatsApp Web
+                const context = await chromium.launchPersistentContext(sessionPath, { headless: false });
+                const page = await context.newPage();
+                await page.goto('https://web.whatsapp.com');
+                playwrightPageRef.current = page;
+                addLog("Please scan QR code if needed.", "tool");
+            }
+
+            const page = playwrightPageRef.current;
+            await page.bringToFront();
+
+            const SEARCH_BOX_SELECTOR = 'div[contenteditable="true"][data-tab="3"]'; // Selector for the search/chat list input
+            const MESSAGE_BOX_SELECTOR = 'div[contenteditable="true"][data-tab="10"]'; // Selector for the message input box
+            
+            await page.waitForSelector(SEARCH_BOX_SELECTOR, { timeout: 120000 }); // Increased timeout for slower loads
+            await page.click(SEARCH_BOX_SELECTOR);
+            await page.fill(SEARCH_BOX_SELECTOR, ''); // Clear any previous text
+            await page.keyboard.type(contact_name);
+            await new Promise(r => setTimeout(r, 1000)); // Small delay for search results to appear
+            await page.keyboard.press('Enter');
+
+            // Wait for the message box to be visible, indicating the chat is open
+            await page.waitForSelector(MESSAGE_BOX_SELECTOR);
+            await page.click(MESSAGE_BOX_SELECTOR);
+            await page.keyboard.type(message);
+            await page.keyboard.press('Enter');
+            
+            return { success: true, message: `Message sent to ${contact_name}`};
+
+        default:
+            throw new Error(`Tool ${fc.name} not found.`);
+    }
+  }, []);
+
+  const stopAssistant = useCallback(() => {
+    setStatus('idle');
+    setIsTalking(false);
+    setTranscript("");
+    addLog("LINK_TERMINATED", "system");
+    setSystemStatus(prev => ({ ...prev, isListening: false }));
+    sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
+    sourcesRef.current.clear();
+    // No need to close the session explicitly here as onclose callback handles it.
+    // If the session was stopped by user, session.close() would be called.
+  }, [addLog]);
+
+  const startAssistant = async () => {
+    if (status !== 'idle') return;
+    setStatus('connecting');
+    addLog("INITIALIZING_NEURAL_UPLINK...", "system");
+    setSystemStatus(prev => ({ ...prev, isListening: true }));
+
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      const apiKey = process.env.API_KEY; // In Electron, process.env is directly available
+      if (!apiKey) throw new Error("API Key not found in environment variables. Please set API_KEY.");
+
+      const ai = new GoogleGenAI({ apiKey });
       audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      const sessionPromise = ai.live.connect({
+      const session = await ai.live.connect({ // Await the connection directly
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          systemInstruction: "You are Myra, an advanced AI Assistant for Tonmoy Das. You reside in his browser and provide high-fidelity vocal assistance. Be sharp, witty, and extremely helpful. You simulate full Windows integration.",
+          systemInstruction: "You are Myra, Tonmoy Das's witty cartoon girl assistant for his Windows laptop. Be snappy and helpful. You can open applications, create and open files/folders, and send WhatsApp messages. Use the available tools to fulfill user requests.",
           inputAudioTranscription: {},
+          tools: [{ functionDeclarations: systemTools }, { googleSearch: {} }]
         },
         callbacks: {
-          onopen: () => { setConnected(true); addLog("LINK_ESTABLISHED"); },
+          onopen: () => { setStatus('online'); addLog("SYNC_SUCCESSFUL", "system"); },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.serverContent?.inputTranscription) setTranscript(msg.serverContent.inputTranscription.text);
             if (msg.serverContent?.modelTurn) setIsTalking(true);
             if (msg.serverContent?.turnComplete) { setIsTalking(false); setTranscript(""); }
             
-            const audioBase64 = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (audioBase64 && audioCtxRef.current) {
+            if (msg.serverContent?.interrupted) {
+              sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
+              sourcesRef.current.clear();
+              nextStartTimeRef.current = 0;
+            }
+
+            const audioData = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+            if (audioData && audioCtxRef.current) {
               const ctx = audioCtxRef.current;
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
-              const buffer = await decodeAudioData(decode(audioBase64), ctx, 24000, 1);
+              const buffer = await decodeAudioData(decode(audioData), ctx, 24000, 1);
               const source = ctx.createBufferSource();
               source.buffer = buffer;
               source.connect(ctx.destination);
+              source.onended = () => sourcesRef.current.delete(source);
+              sourcesRef.current.add(source);
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
             }
+
+            if (msg.toolCall) {
+              for (const fc of msg.toolCall.functionCalls) {
+                addLog(`TOOL_EXEC: ${fc.name}(${JSON.stringify(fc.args)})`, "tool");
+                setToolLogs(prev => [{ id: fc.id, name: fc.name, args: fc.args, status: 'pending', timestamp: Date.now() }, ...prev.slice(0, 5)]);
+                
+                let result: any;
+                try {
+                  result = await handleToolCall(fc);
+                  setToolLogs(prev => prev.map(t => t.id === fc.id ? { ...t, status: 'success' } : t));
+                } catch (e: any) {
+                  addLog(`TOOL_ERROR: ${fc.name} - ${e.message}`, "error");
+                  result = { error: e.message };
+                  setToolLogs(prev => prev.map(t => t.id === fc.id ? { ...t, status: 'error' } : t));
+                }
+
+                session.sendToolResponse({ // Use the resolved session here
+                  functionResponses: {
+                    id: fc.id,
+                    name: fc.name,
+                    response: { result: JSON.stringify(result) },
+                  }
+                });
+              }
+            }
           },
-          onclose: () => { setConnected(false); addLog("LINK_DROPPED"); },
-          onerror: (err) => { console.error(err); addLog("CORE_MALFUNCTION"); },
+          onclose: () => stopAssistant(),
+          onerror: (e) => { 
+            addLog(`SYNC_ERROR: ${e instanceof ErrorEvent ? e.message : String(e)}`, "error"); 
+            stopAssistant(); 
+          }
         }
       });
+      sessionPromiseRef.current = Promise.resolve(session); // Store the resolved session in ref
 
       const inCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      const processor = inCtx.createScriptProcessor(1024, 1, 1);
+      analyserRef.current = inCtx.createAnalyser();
+      analyserRef.current.fftSize = 256;
+      
+      const sourceNode = inCtx.createMediaStreamSource(stream);
+      const processor = inCtx.createScriptProcessor(2048, 1, 1);
+      
+      sourceNode.connect(analyserRef.current);
+      analyserRef.current.connect(processor);
+      processor.connect(inCtx.destination);
+
       processor.onaudioprocess = (e) => {
         const input = e.inputBuffer.getChannelData(0);
-        let rms = 0; for(let i=0; i<input.length; i++) rms += input[i]*input[i];
-        setInputLevel(Math.sqrt(rms/input.length));
-        sessionPromise.then(s => s.sendRealtimeInput({ media: createBlob(input) })).catch(() => {});
+        let sum = 0; for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+        setAudioLevel(Math.sqrt(sum / input.length));
+        // Use the resolved session from the ref
+        sessionPromiseRef.current?.then(s => s.sendRealtimeInput({ media: createBlob(input) })).catch((sendErr: any) => { /* console.error("Error sending input:", sendErr); */ });
       };
-      inCtx.createMediaStreamSource(stream).connect(processor);
-      processor.connect(inCtx.destination);
-    } catch (e) { addLog("PERMISSION_FAILURE"); }
+      
+    } catch (err: any) {
+      addLog(`BOOT_FAILURE: ${err.message}`, "error");
+      setStatus('idle'); // Crucial: Reset status to idle so the button reappears
+      setSystemStatus(prev => ({ ...prev, isListening: false }));
+      // Ensure microphone stream is stopped if an error occurs early
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(console.error);
+        audioCtxRef.current = null;
+      }
+    }
   };
 
   return (
-    <div className="flex h-screen w-full flex-col p-8 gap-8 relative overflow-hidden select-none">
-      <header className="flex items-center justify-between px-4 z-10">
-        <div className="flex flex-col">
-          <h1 className="unique-header text-5xl uppercase font-black">Myra Core</h1>
-          <div className="flex items-center gap-3 mt-1 opacity-50">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-            <span className="text-[10px] font-mono font-bold tracking-[0.4em] uppercase">V-ID: DAS_TONMOY_01</span>
-          </div>
+    <div className="flex h-screen w-full flex-col p-8 gap-8 relative overflow-hidden select-none text-slate-100">
+      <header className="flex items-center justify-between z-30 px-4">
+        <div>
+          <h1 className="unique-header text-5xl font-black tracking-tighter uppercase">Myra AI</h1>
+          <p className="text-[10px] font-mono opacity-50 uppercase tracking-[0.4em] mt-1">Host: Tonmoy_Das_Laptop</p>
         </div>
-        <div className="flex items-center gap-6">
-          <div className="glass px-6 py-3 rounded-full flex items-center gap-4">
-             <div className={`w-2 h-2 rounded-full ${connected ? 'bg-amber-500 shadow-[0_0_10px_#f59e0b]' : 'bg-stone-800'}`}></div>
-             <span className="text-[11px] font-mono font-black text-stone-400 uppercase tracking-widest">{connected ? 'Online' : 'Standby'}</span>
-          </div>
+        <div className="glass px-6 py-3 rounded-2xl flex items-center gap-4">
+          <div className={`w-2 h-2 rounded-full ${status === 'online' ? 'bg-indigo-500 animate-pulse' : 'bg-red-500'}`}></div>
+          <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Neural Sync: {status}</span>
         </div>
       </header>
 
-      <div className="flex flex-1 gap-8 overflow-hidden">
-        <nav className="w-24 glass rounded-[4rem] flex flex-col items-center py-12 gap-12 border-white/5 shadow-2xl">
-          <button onClick={initLink} className={`text-3xl transition-all ${connected ? 'text-amber-500 scale-125' : 'text-stone-700 hover:text-white'}`}><i className="fa-solid fa-microphone-lines"></i></button>
-          <button onClick={() => setView('dash')} className={`text-3xl transition-all ${view === 'dash' ? 'text-amber-400 scale-125' : 'text-stone-700 hover:text-white'}`}><i className="fa-solid fa-gauge-high"></i></button>
-          <button onClick={() => setView('tasks')} className={`text-3xl transition-all ${view === 'tasks' ? 'text-amber-500 scale-125' : 'text-stone-700 hover:text-white'}`}><i className="fa-solid fa-clipboard-list"></i></button>
+      <div className="flex-1 flex gap-8 z-20 overflow-hidden">
+        <nav className="w-20 glass rounded-[3rem] flex flex-col items-center py-12 gap-8 shrink-0">
+          <button 
+            onClick={status === 'online' ? stopAssistant : startAssistant} 
+            className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl transition-all ${status === 'online' ? 'bg-indigo-500 text-white' : 'bg-white/5 text-stone-600'}`}
+            aria-label={status === 'online' ? 'Stop Assistant' : 'Start Assistant'}
+          >
+            <i className="fa-solid fa-microphone"></i>
+          </button>
+          <button className="w-12 h-12 rounded-xl flex items-center justify-center text-xl text-stone-700" aria-label="Home"><i className="fa-solid fa-house"></i></button>
+          <button className="w-12 h-12 rounded-xl flex items-center justify-center text-xl text-stone-700" aria-label="Settings"><i className="fa-solid fa-gear"></i></button>
         </nav>
 
-        <main className="flex-1 flex gap-8 overflow-hidden">
-          <section className="flex-1 glass rounded-[5rem] border-white/5 flex items-center justify-center relative overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/5 to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
-            <NeuralCore isActive={connected} isTalking={isTalking} level={inputLevel} />
+        <main className="flex-1 flex gap-8">
+          <section className="flex-1 glass rounded-[4rem] relative flex items-center justify-center overflow-hidden border-white/5 bg-indigo-500/5">
+            <Visualizer
+                isActive={status === 'online'}
+                isAITalking={isTalking}
+                analyzer={analyserRef.current ?? undefined}
+                volume={systemStatus.volume}
+                brightness={systemStatus.brightness}
+                battery={95} // Placeholder
+                isSharingScreen={systemStatus.isSharingScreen} // Placeholder
+                cpuUsage={35} // Placeholder
+                isOnline={systemStatus.isConnected} // Placeholder
+            />
+            
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                <MyraAvatar isTalking={isTalking} level={audioLevel} />
+            </div>
+            
             {transcript && (
-              <div className="absolute bottom-20 bg-black/80 backdrop-blur-3xl px-12 py-6 rounded-full border border-white/10 text-xl font-medium italic shadow-[0_20px_60px_-15px_rgba(0,0,0,0.7)] text-amber-200">
+              <div className="absolute bottom-12 bg-black/70 backdrop-blur-3xl px-10 py-5 rounded-2xl border border-white/10 text-xl italic text-indigo-100 max-w-[70%] text-center">
                 "{transcript}"
               </div>
             )}
+            
+            {status === 'idle' && (
+              <button onClick={startAssistant} className="absolute inset-0 bg-black/20 flex items-center justify-center group">
+                <div className="glass px-12 py-6 rounded-3xl border-indigo-500/30 text-indigo-400 font-bold uppercase tracking-widest group-hover:scale-110 transition-transform">Sync Assistant</div>
+              </button>
+            )}
+            {status === 'connecting' && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                    <div className="flex items-center gap-4 text-indigo-300 font-bold text-lg">
+                        <i className="fa-solid fa-spinner fa-spin"></i>
+                        <span>Connecting...</span>
+                    </div>
+                </div>
+            )}
           </section>
 
-          <aside className="w-[400px] flex flex-col gap-8">
-            <div className="h-[300px] glass rounded-[4rem] p-10 flex flex-col overflow-hidden">
-               <span className="text-[10px] font-black tracking-[0.6em] text-amber-500 uppercase mb-8">System Telemetry</span>
-               <div className="flex-1 overflow-y-auto custom-scroll space-y-4 font-mono text-[10px] text-stone-500">
-                  {logs.map((l, i) => (
-                    <div key={i} className="flex gap-4">
-                      <span className="text-amber-500/30">❯</span>
-                      <span>{l}</span>
-                    </div>
-                  ))}
-                  {logs.length === 0 && <div className="opacity-20 italic">WAITING FOR KERNEL HOOK...</div>}
+          <aside className="w-[380px] flex flex-col gap-8">
+            <div className="h-[300px] glass rounded-[3rem] p-8 overflow-hidden">
+               <span className="text-[10px] font-black tracking-widest text-indigo-500 uppercase block mb-6">Neural Stream</span>
+               <div className="space-y-4 font-mono text-[10px] overflow-y-auto custom-scroll h-full pb-8">
+                  {logs.map(l => <div key={l.id} className="flex gap-2 opacity-80"><span className="text-stone-600">[{l.time}]</span><span>{l.message}</span></div>)}
                </div>
             </div>
-            <div className="flex-1 glass rounded-[4rem] p-12 flex flex-col">
-               <span className="text-[10px] font-black tracking-[0.6em] text-stone-600 uppercase mb-8">Registry Stats</span>
-               <div className="space-y-8 mt-4">
-                  {[ 
-                    {l:'Memory Use', v:'4.2 GB', p: 40}, 
-                    {l:'Network', v:'120 Mbps', p: 85}, 
-                    {l:'Latency', v:'32 ms', p: 15} 
-                  ].map((s,i) => (
-                    <div key={i} className="flex flex-col gap-3">
-                      <div className="flex justify-between items-center text-[12px] font-mono uppercase">
-                        <span className="text-stone-500">{s.l}</span>
-                        <span className="text-amber-500 font-black">{s.v}</span>
-                      </div>
-                      <div className="h-1 bg-stone-900 rounded-full overflow-hidden">
-                        <div className="h-full bg-amber-500/50" style={{ width: `${s.p}%` }}></div>
+            <div className="flex-1 glass rounded-[3rem] p-8">
+               <span className="text-[10px] font-black tracking-widest text-stone-500 uppercase block mb-6">Action Matrix</span>
+               <div className="space-y-3">
+                  {toolLogs.map(tl => (
+                    <div key={tl.id} className="bg-white/5 p-4 rounded-xl border border-white/5">
+                      <div className="flex justify-between items-center text-[10px] font-bold uppercase text-indigo-300">
+                        <span>{tl.name}</span>
+                        <span className={`capitalize ${tl.status === 'success' ? 'text-emerald-500' : tl.status === 'error' ? 'text-red-500' : 'text-yellow-500'}`}>{tl.status}</span>
                       </div>
                     </div>
                   ))}
-               </div>
-               <div className="mt-auto pt-10 border-t border-white/5 text-center">
-                 <p className="text-[10px] font-black text-stone-800 tracking-[0.3em] uppercase">Proprietary Node v1.0.4</p>
+                  {toolLogs.length === 0 && <p className="text-[10px] text-stone-600 italic">No tasks executed.</p>}
                </div>
             </div>
           </aside>

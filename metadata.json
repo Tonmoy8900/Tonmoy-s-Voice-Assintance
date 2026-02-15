@@ -1,9 +1,8 @@
 {
-  "name": "Myra AI Assistant",
-  "description": "Voice-enabled intelligent assistant for Windows users.",
   "requestFramePermissions": [
     "microphone",
-    "camera",
-    "geolocation"
-  ]
+    "camera"
+  ],
+  "name": "Myra AI | Windows Intelligence",
+  "description": "Next-gen voice and vision assistant for Windows laptops."
 }

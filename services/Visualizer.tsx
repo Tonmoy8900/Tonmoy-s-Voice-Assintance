@@ -1,6 +1,7 @@
 
 import React, { useEffect, useRef } from 'react';
-import { select, mean, lineRadial, curveBasisClosed } from 'd3';
+// Use namespace import for D3 to fix "no exported member" errors in TypeScript environments
+import * as d3 from 'd3';
 
 interface VisualizerProps {
   isActive: boolean;
@@ -32,7 +33,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
 
     const width = 600;
     const height = 600;
-    const svg = select(svgRef.current);
+    // Fix: Use d3.select instead of direct select
+    const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
 
     const defs = svg.append('defs');
@@ -83,7 +85,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
     });
 
     let animationId: number;
-    const line = lineRadial<[number, number]>().curve(curveBasisClosed);
+    // Fix: Use d3 namespace for lineRadial and curveBasisClosed
+    const line = d3.lineRadial<[number, number]>().curve(d3.curveBasisClosed);
     const numPoints = 24;
 
     const render = () => {
@@ -94,7 +97,8 @@ const Visualizer: React.FC<VisualizerProps> = ({
       if (analyzer && isActive) {
         freqData = new Uint8Array(analyzer.frequencyBinCount);
         analyzer.getByteFrequencyData(freqData);
-        intensity = mean(freqData) || 0;
+        // Fix: Use d3.mean instead of direct mean
+        intensity = d3.mean(freqData) || 0;
       }
 
       const baseRadius = 110 + (intensity * 0.7);
