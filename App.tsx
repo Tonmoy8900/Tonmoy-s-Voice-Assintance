@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type, FunctionDeclaration } from '@google/genai';
-import { decode, decodeAudioData, createBlob, blobToBase64 } from './audioUtils'; // Import blobToBase64
+import { decode, decodeAudioData, createBlob, blobToBase64 } from './audioUtils';
 import MyraAvatar from './components/MyraAvatar';
 import Visualizer from './services/Visualizer';
 import { SystemStatus } from './types';
@@ -30,6 +30,15 @@ const systemTools: FunctionDeclaration[] = [
       description: 'Opens a Windows application.',
       properties: { app_name: { type: Type.STRING, description: 'Application name (e.g., notepad, chrome, explorer, cmd)' } },
       required: ['app_name']
+    }
+  },
+  {
+    name: 'open_file',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Opens an existing file with its default application. Requires a valid and accessible file path.',
+      properties: { file_path: { type: Type.STRING, description: 'The full path or relative path of the file to open, e.g., "C:/Users/User/Documents/report.pdf" or "notes.txt"' } },
+      required: ['file_path']
     }
   },
   {
@@ -70,7 +79,7 @@ const systemTools: FunctionDeclaration[] = [
       name: 'send_whatsapp_message',
       parameters: {
           type: Type.OBJECT,
-          description: 'Sends a WhatsApp message to a contact.',
+          description: 'Sends a WhatsApp message to a contact by name (e.g., "Mom", "John Doe"). The contact must be saved in WhatsApp. Does not work with raw numbers.',
           properties: {
               contact_name: { type: Type.STRING, description: 'The name of the contact as saved in WhatsApp.' },
               message: { type: Type.STRING, description: 'The message to send.' }
@@ -123,7 +132,7 @@ const App: React.FC = () => {
     const fs = (window as any).require('fs');
     const path = (window as any).require('path');
     const { chromium } = (window as any).require('playwright');
-    const { ipcRenderer } = (window as any).require('electron');
+    const { ipcRenderer, shell } = (window as any).require('electron');
 
 
     switch (fc.name) {
@@ -142,6 +151,26 @@ const App: React.FC = () => {
                 return { success: true, message: `Opened ${app}` };
             } else {
                 throw new Error(`Application ${app} not supported.`);
+            }
+
+        case 'open_file':
+            const { file_path } = fc.args;
+            const resolvedFilePath = path.resolve(file_path);
+            
+            // Check if file exists before attempting to open
+            if (!fs.existsSync(resolvedFilePath)) {
+              throw new Error(`File not found at specified path: ${resolvedFilePath}`);
+            }
+
+            try {
+              // Using shell.openPath for better integration and error handling in Electron
+              const result = await shell.openPath(resolvedFilePath);
+              if (result.startsWith('Error')) { // shell.openPath returns error string on failure
+                throw new Error(result);
+              }
+              return { success: true, message: `Opened file: ${resolvedFilePath}` };
+            } catch (error: any) {
+              throw new Error(`Failed to open file ${resolvedFilePath}: ${error.message}`);
             }
 
         case 'create_file':
@@ -277,7 +306,7 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          systemInstruction: "You are Myra, Tonmoy Das's witty cartoon girl assistant for his Windows laptop. Be snappy, helpful, and personable. You have vision capabilities via the user's camera, so you can perceive what's in front of you. Use this visual context in your responses when relevant. You can open applications, create and open files/folders, and send WhatsApp messages. Use the available tools to fulfill user requests. Also, answer general knowledge questions and engage in conversational chat.",
+          systemInstruction: "You are Myra, Tonmoy Das's witty cartoon girl assistant for his Windows laptop. Be snappy, helpful, and personable. You have vision capabilities via the user's camera, so you can perceive what's in front of you. Use this visual context in your responses when relevant. You can open files (requiring a valid and accessible path), open applications, create and open files/folders, and send WhatsApp messages to saved contacts (not raw numbers). Use the available tools to fulfill user requests. Also, answer general knowledge questions and engage in conversational chat.",
           inputAudioTranscription: {},
           outputAudioTranscription: {}, // Enable transcription for model output audio
           tools: [{ functionDeclarations: systemTools }, { googleSearch: {} }]
